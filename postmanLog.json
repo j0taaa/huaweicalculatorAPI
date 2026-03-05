@@ -1,0 +1,529 @@
+{
+  "info": {
+    "_postman_id": "8ec03c9c-cae7-426a-aa9a-b61cd3a81f5a",
+    "name": "New Collection",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "16307827",
+    "_collection_link": "https://go.postman.co/collection/16307827-8ec03c9c-cae7-426a-aa9a-b61cd3a81f5a?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "Get price",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "accept",
+            "value": "application/json, text/plain, */*"
+          },
+          {
+            "key": "accept-language",
+            "value": "en-US,en;q=0.9"
+          },
+          {
+            "key": "content-type",
+            "value": "application/json; charset=UTF-8"
+          },
+          {
+            "key": "origin",
+            "value": "https://www.huaweicloud.com"
+          },
+          {
+            "key": "priority",
+            "value": "u=1, i"
+          },
+          {
+            "key": "referer",
+            "value": "https://www.huaweicloud.com/intl/en-us/pricing/calculator.html?tempShareList=true"
+          },
+          {
+            "key": "sec-ch-ua",
+            "value": "\"Google Chrome\";v=\"143\", \"Chromium\";v=\"143\", \"Not A(Brand\";v=\"24\""
+          },
+          {
+            "key": "sec-ch-ua-mobile",
+            "value": "?0"
+          },
+          {
+            "key": "sec-ch-ua-platform",
+            "value": "\"Windows\""
+          },
+          {
+            "key": "sec-fetch-dest",
+            "value": "empty"
+          },
+          {
+            "key": "sec-fetch-mode",
+            "value": "cors"
+          },
+          {
+            "key": "sec-fetch-site",
+            "value": "same-site"
+          },
+          {
+            "key": "user-agent",
+            "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+          },
+          {
+            "key": "wise-groupid",
+            "value": "3.d3d3Lmh1YXdlaWNsb3VkLmNvbS9pbnRsL2VuLXVzL3ByaWNpbmcvY2FsY3VsYXRvci5odG1sIy9lY3N8Y2FsY3VsYXRvcl9lY3NfcmFkaW9fNHwxNkdpQg==.5cbb2192fb2240d5815af45f08209805.DJD29Re0.1772732725668",
+            "disabled": true
+          },
+          {
+            "key": "Cookie",
+            "value": "vk=387aaa60-f75f-4371-9d05-373e4aae1d6a; cbc-sid=204937c93812c7d04fe7af1b8206de94fa36bab51f31397c4bdb1e30b52817039a72b7e6e70236d0377e; _frid=49a2987da4c44f78aa297020cb1bbb33; uba_countrycode=BR; _ga=GA1.2.51837132.1744208621; uba_vk=387aaa60-f75f-4371-9d05-373e4aae1d6a; ua=5cbb2192fb2240d5815af45f08209805; deviceid=DJD29Re0; Hm_lvt_e7a90fbb918d40aec64d1170a5ca608f=1760041539,1760642635,1762350782; recentServices=[\"CCI2\",\"obs\",\"nat\",\"elb\",\"ecm\",\"CCE\"]; HWWAFSESID=baedfdf4faa099fd85; HWWAFSESTIME=1769519680437; SessionID=c906c4fb-7efd-4aa7-837c-f10eea144e19; ad_sc=; ad_mdm=; ad_cmp=; ad_ctt=; ad_tm=; ad_adp=; user_tag=f04e1d3b40c34c13aa9f14118f7217e5; domain_tag=5cbb2192fb2240d5815af45f08209805; popup_max_time=60; masked_phone=; masked_user=g****7609; masked_domain=g****7609; usite=intl; x-framework-ob=hec-hk; SID=Set2; ECO_INTL_ID=RZrHMbihGPfugxER5HO1sA.._-_1769538917_-_VdaC2dzhVANLClQ9MG0vP0fF28o.; csrf-eco=01b5facd-73cd-4409-9d8f-19749b5174ed; console_cftk=Q7MF-N7A2-O2F0-AQ9S-VNSB-02P0-IQDV-G4MH; HWS_ID=X0P_e7eY3bJEB4fEPtx6pw.._-_1769798043_-_QFK0OhOgXT3iXKAHCxmncRNeGew.; _gid=GA1.2.984975513.1772476382; cf=comparecloud.in; browserCheckResult=A; g50047609_g50047609_cfProjectName=sa-brazil-1; agreed-cookiepolicy=1; cfLatestRecordTimestamp=1772651049788; _fr_ssid=99190f51f0ce4d71a178f8847d0e9821; _gat=1; locale=en-us; HWS_INTL_ID=yn8MXsCY2OlRJ0wo5-YaPA.._-_1772736297_-_4pi_UDOny12hl7mi9gJyroWkPhU.; csrf=e045f84e-9a2a-4663-9bbc-a2cbce221207",
+            "disabled": true
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"regionId\":\"sa-brazil-1\",\"chargingMode\":1,\"periodType\":4,\"periodNum\":1,\"subscriptionNum\":1,\"siteCode\":\"HWC\",\"productInfos\":[{\"id\":\"1772732725959-0-OFFI1012619015198507015\",\"cloudServiceType\":\"hws.service.type.ec2\",\"resourceType\":\"hws.resource.type.vm\",\"resourceSpecCode\":\"x1.2u.16g.linux\",\"productNum\":1,\"usageFactor\":\"Duration\",\"usageMeasureId\":4,\"usageValue\":744},{\"id\":\"1772732725959-2-00301-247376-0--0\",\"cloudServiceType\":\"hws.service.type.ebs\",\"resourceType\":\"hws.resource.type.volume\",\"resourceSpecCode\":\"GPSSD\",\"productNum\":1,\"resourceSize\":40,\"resouceSizeMeasureId\":17,\"usageFactor\":\"Duration\",\"usageMeasureId\":4,\"usageValue\":744}]}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://portal-intl.huaweicloud.com/api/cbc/global/rest/BSS/billing/ratingservice/v2/inquiry/resource?servieName=ecs",
+          "protocol": "https",
+          "host": [
+            "portal-intl",
+            "huaweicloud",
+            "com"
+          ],
+          "path": [
+            "api",
+            "cbc",
+            "global",
+            "rest",
+            "BSS",
+            "billing",
+            "ratingservice",
+            "v2",
+            "inquiry",
+            "resource"
+          ],
+          "query": [
+            {
+              "key": "servieName",
+              "value": "ecs"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get all carts",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "accept",
+            "value": "application/json, text/plain, */*"
+          },
+          {
+            "key": "accept-language",
+            "value": "en-US,en;q=0.9"
+          },
+          {
+            "key": "csrf",
+            "value": "e045f84e-9a2a-4663-9bbc-a2cbce221207"
+          },
+          {
+            "key": "origin",
+            "value": "https://www.huaweicloud.com"
+          },
+          {
+            "key": "priority",
+            "value": "u=1, i"
+          },
+          {
+            "key": "referer",
+            "value": "https://www.huaweicloud.com/intl/en-us/pricing/calculator.html?tempShareList=true"
+          },
+          {
+            "key": "sec-ch-ua",
+            "value": "\"Google Chrome\";v=\"143\", \"Chromium\";v=\"143\", \"Not A(Brand\";v=\"24\""
+          },
+          {
+            "key": "sec-ch-ua-mobile",
+            "value": "?0"
+          },
+          {
+            "key": "sec-ch-ua-platform",
+            "value": "\"Windows\""
+          },
+          {
+            "key": "sec-fetch-dest",
+            "value": "empty"
+          },
+          {
+            "key": "sec-fetch-mode",
+            "value": "cors"
+          },
+          {
+            "key": "sec-fetch-site",
+            "value": "same-site"
+          },
+          {
+            "key": "user-agent",
+            "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+          },
+          {
+            "key": "wise-groupid",
+            "value": "3.d3d3Lmh1YXdlaWNsb3VkLmNvbS9pbnRsL2VuLXVzL3ByaWNpbmcvY2FsY3VsYXRvci5odG1sIy9lY3N8fA==..DJD29Re0.1772732944133"
+          },
+          {
+            "key": "Cookie",
+            "value": "vk=387aaa60-f75f-4371-9d05-373e4aae1d6a; cbc-sid=204937c93812c7d04fe7af1b8206de94fa36bab51f31397c4bdb1e30b52817039a72b7e6e70236d0377e; _frid=49a2987da4c44f78aa297020cb1bbb33; uba_countrycode=BR; _ga=GA1.2.51837132.1744208621; uba_vk=387aaa60-f75f-4371-9d05-373e4aae1d6a; ua=5cbb2192fb2240d5815af45f08209805; deviceid=DJD29Re0; Hm_lvt_e7a90fbb918d40aec64d1170a5ca608f=1760041539,1760642635,1762350782; recentServices=[\"CCI2\",\"obs\",\"nat\",\"elb\",\"ecm\",\"CCE\"]; HWWAFSESID=baedfdf4faa099fd85; HWWAFSESTIME=1769519680437; SessionID=c906c4fb-7efd-4aa7-837c-f10eea144e19; ad_sc=; ad_mdm=; ad_cmp=; ad_ctt=; ad_tm=; ad_adp=; user_tag=f04e1d3b40c34c13aa9f14118f7217e5; domain_tag=5cbb2192fb2240d5815af45f08209805; popup_max_time=60; masked_phone=; masked_user=g****7609; masked_domain=g****7609; usite=intl; x-framework-ob=hec-hk; SID=Set2; ECO_INTL_ID=RZrHMbihGPfugxER5HO1sA.._-_1769538917_-_VdaC2dzhVANLClQ9MG0vP0fF28o.; csrf-eco=01b5facd-73cd-4409-9d8f-19749b5174ed; console_cftk=Q7MF-N7A2-O2F0-AQ9S-VNSB-02P0-IQDV-G4MH; HWS_ID=X0P_e7eY3bJEB4fEPtx6pw.._-_1769798043_-_QFK0OhOgXT3iXKAHCxmncRNeGew.; _gid=GA1.2.984975513.1772476382; cf=comparecloud.in; browserCheckResult=A; g50047609_g50047609_cfProjectName=sa-brazil-1; agreed-cookiepolicy=1; cfLatestRecordTimestamp=1772651049788; _fr_ssid=99190f51f0ce4d71a178f8847d0e9821; locale=en-us; HWS_INTL_ID=yn8MXsCY2OlRJ0wo5-YaPA.._-_1772736297_-_4pi_UDOny12hl7mi9gJyroWkPhU.; csrf=e045f84e-9a2a-4663-9bbc-a2cbce221207; _gat=1"
+          }
+        ],
+        "url": {
+          "raw": "https://portal-intl.huaweicloud.com/api/calculator/rest/cbc/portalcalculatornodeservice/v4/api/share/list",
+          "protocol": "https",
+          "host": [
+            "portal-intl",
+            "huaweicloud",
+            "com"
+          ],
+          "path": [
+            "api",
+            "calculator",
+            "rest",
+            "cbc",
+            "portalcalculatornodeservice",
+            "v4",
+            "api",
+            "share",
+            "list"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Create cart",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "accept",
+            "value": "application/json, text/plain, */*"
+          },
+          {
+            "key": "accept-language",
+            "value": "en-US,en;q=0.9"
+          },
+          {
+            "key": "content-type",
+            "value": "application/json"
+          },
+          {
+            "key": "csrf",
+            "value": "e045f84e-9a2a-4663-9bbc-a2cbce221207"
+          },
+          {
+            "key": "origin",
+            "value": "https://www.huaweicloud.com"
+          },
+          {
+            "key": "priority",
+            "value": "u=1, i"
+          },
+          {
+            "key": "referer",
+            "value": "https://www.huaweicloud.com/intl/en-us/pricing/calculator.html?tempShareList=true"
+          },
+          {
+            "key": "sec-ch-ua",
+            "value": "\"Google Chrome\";v=\"143\", \"Chromium\";v=\"143\", \"Not A(Brand\";v=\"24\""
+          },
+          {
+            "key": "sec-ch-ua-mobile",
+            "value": "?0"
+          },
+          {
+            "key": "sec-ch-ua-platform",
+            "value": "\"Windows\""
+          },
+          {
+            "key": "sec-fetch-dest",
+            "value": "empty"
+          },
+          {
+            "key": "sec-fetch-mode",
+            "value": "cors"
+          },
+          {
+            "key": "sec-fetch-site",
+            "value": "same-site"
+          },
+          {
+            "key": "user-agent",
+            "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+          },
+          {
+            "key": "wise-groupid",
+            "value": "3.d3d3Lmh1YXdlaWNsb3VkLmNvbS9pbnRsL2VuLXVzL3ByaWNpbmcvY2FsY3VsYXRvci5odG1sIy9lY3N8dW5kZWZpbmVkX1VOU0VUX2RpYWxvZ3xPSw==.5cbb2192fb2240d5815af45f08209805.DJD29Re0.1772733592524"
+          },
+          {
+            "key": "Cookie",
+            "value": "vk=387aaa60-f75f-4371-9d05-373e4aae1d6a; cbc-sid=204937c93812c7d04fe7af1b8206de94fa36bab51f31397c4bdb1e30b52817039a72b7e6e70236d0377e; _frid=49a2987da4c44f78aa297020cb1bbb33; uba_countrycode=BR; _ga=GA1.2.51837132.1744208621; uba_vk=387aaa60-f75f-4371-9d05-373e4aae1d6a; ua=5cbb2192fb2240d5815af45f08209805; deviceid=DJD29Re0; Hm_lvt_e7a90fbb918d40aec64d1170a5ca608f=1760041539,1760642635,1762350782; recentServices=[\"CCI2\",\"obs\",\"nat\",\"elb\",\"ecm\",\"CCE\"]; HWWAFSESID=baedfdf4faa099fd85; HWWAFSESTIME=1769519680437; SessionID=c906c4fb-7efd-4aa7-837c-f10eea144e19; ad_sc=; ad_mdm=; ad_cmp=; ad_ctt=; ad_tm=; ad_adp=; user_tag=f04e1d3b40c34c13aa9f14118f7217e5; domain_tag=5cbb2192fb2240d5815af45f08209805; popup_max_time=60; masked_phone=; masked_user=g****7609; masked_domain=g****7609; usite=intl; x-framework-ob=hec-hk; SID=Set2; ECO_INTL_ID=RZrHMbihGPfugxER5HO1sA.._-_1769538917_-_VdaC2dzhVANLClQ9MG0vP0fF28o.; csrf-eco=01b5facd-73cd-4409-9d8f-19749b5174ed; console_cftk=Q7MF-N7A2-O2F0-AQ9S-VNSB-02P0-IQDV-G4MH; HWS_ID=X0P_e7eY3bJEB4fEPtx6pw.._-_1769798043_-_QFK0OhOgXT3iXKAHCxmncRNeGew.; _gid=GA1.2.984975513.1772476382; cf=comparecloud.in; browserCheckResult=A; g50047609_g50047609_cfProjectName=sa-brazil-1; agreed-cookiepolicy=1; cfLatestRecordTimestamp=1772651049788; _fr_ssid=99190f51f0ce4d71a178f8847d0e9821; locale=en-us; HWS_INTL_ID=yn8MXsCY2OlRJ0wo5-YaPA.._-_1772736297_-_4pi_UDOny12hl7mi9gJyroWkPhU.; csrf=e045f84e-9a2a-4663-9bbc-a2cbce221207; _gat=1"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"billingMode\":\"cart.shareList.billingModeTotal\",\"cartListData\":[],\"name\":\"test\",\"totalPrice\":{\"amount\":0,\"discountAmount\":0,\"originalAmount\":0}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://portal-intl.huaweicloud.com/api/calculator/rest/cbc/portalcalculatornodeservice/v4/api/share/add",
+          "protocol": "https",
+          "host": [
+            "portal-intl",
+            "huaweicloud",
+            "com"
+          ],
+          "path": [
+            "api",
+            "calculator",
+            "rest",
+            "cbc",
+            "portalcalculatornodeservice",
+            "v4",
+            "api",
+            "share",
+            "add"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get product options and info",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "accept",
+            "value": "application/json, text/plain, */*"
+          },
+          {
+            "key": "accept-language",
+            "value": "en-US,en;q=0.9"
+          },
+          {
+            "key": "csrf",
+            "value": "e045f84e-9a2a-4663-9bbc-a2cbce221207"
+          },
+          {
+            "key": "origin",
+            "value": "https://www.huaweicloud.com"
+          },
+          {
+            "key": "priority",
+            "value": "u=1, i"
+          },
+          {
+            "key": "referer",
+            "value": "https://www.huaweicloud.com/intl/en-us/pricing/calculator.html?tempShareList=true"
+          },
+          {
+            "key": "sec-ch-ua",
+            "value": "\"Google Chrome\";v=\"143\", \"Chromium\";v=\"143\", \"Not A(Brand\";v=\"24\""
+          },
+          {
+            "key": "sec-ch-ua-mobile",
+            "value": "?0"
+          },
+          {
+            "key": "sec-ch-ua-platform",
+            "value": "\"Windows\""
+          },
+          {
+            "key": "sec-fetch-dest",
+            "value": "empty"
+          },
+          {
+            "key": "sec-fetch-mode",
+            "value": "cors"
+          },
+          {
+            "key": "sec-fetch-site",
+            "value": "same-site"
+          },
+          {
+            "key": "user-agent",
+            "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+          },
+          {
+            "key": "wise-groupid",
+            "value": "3.d3d3Lmh1YXdlaWNsb3VkLmNvbS9pbnRsL2VuLXVzL3ByaWNpbmcvY2FsY3VsYXRvci5odG1sIy9jcGh8aG90TWVudV9DUzEwMDAwMDAyX2Vjc3xFbGFzdGljIENsb3VkIFNlcnZlcg==.5cbb2192fb2240d5815af45f08209805.DJD29Re0.1772733927924",
+            "disabled": true
+          },
+          {
+            "key": "Cookie",
+            "value": "vk=387aaa60-f75f-4371-9d05-373e4aae1d6a; cbc-sid=204937c93812c7d04fe7af1b8206de94fa36bab51f31397c4bdb1e30b52817039a72b7e6e70236d0377e; _frid=49a2987da4c44f78aa297020cb1bbb33; uba_countrycode=BR; _ga=GA1.2.51837132.1744208621; uba_vk=387aaa60-f75f-4371-9d05-373e4aae1d6a; ua=5cbb2192fb2240d5815af45f08209805; deviceid=DJD29Re0; Hm_lvt_e7a90fbb918d40aec64d1170a5ca608f=1760041539,1760642635,1762350782; recentServices=[\"CCI2\",\"obs\",\"nat\",\"elb\",\"ecm\",\"CCE\"]; HWWAFSESID=baedfdf4faa099fd85; HWWAFSESTIME=1769519680437; SessionID=c906c4fb-7efd-4aa7-837c-f10eea144e19; ad_sc=; ad_mdm=; ad_cmp=; ad_ctt=; ad_tm=; ad_adp=; user_tag=f04e1d3b40c34c13aa9f14118f7217e5; domain_tag=5cbb2192fb2240d5815af45f08209805; popup_max_time=60; masked_phone=; masked_user=g****7609; masked_domain=g****7609; usite=intl; x-framework-ob=hec-hk; SID=Set2; ECO_INTL_ID=RZrHMbihGPfugxER5HO1sA.._-_1769538917_-_VdaC2dzhVANLClQ9MG0vP0fF28o.; csrf-eco=01b5facd-73cd-4409-9d8f-19749b5174ed; console_cftk=Q7MF-N7A2-O2F0-AQ9S-VNSB-02P0-IQDV-G4MH; HWS_ID=X0P_e7eY3bJEB4fEPtx6pw.._-_1769798043_-_QFK0OhOgXT3iXKAHCxmncRNeGew.; _gid=GA1.2.984975513.1772476382; cf=comparecloud.in; browserCheckResult=A; g50047609_g50047609_cfProjectName=sa-brazil-1; agreed-cookiepolicy=1; cfLatestRecordTimestamp=1772651049788; _fr_ssid=99190f51f0ce4d71a178f8847d0e9821; locale=en-us; HWS_INTL_ID=yn8MXsCY2OlRJ0wo5-YaPA.._-_1772736297_-_4pi_UDOny12hl7mi9gJyroWkPhU.; csrf=e045f84e-9a2a-4663-9bbc-a2cbce221207; _gat=1",
+            "disabled": true
+          }
+        ],
+        "url": {
+          "raw": "https://portal-intl.huaweicloud.com/api/calculator/rest/cbc/portalcalculatornodeservice/v4/api/productInfo?urlPath=ecs&tag=general.online.portal&region=ap-southeast-3&tab=detail&sign=common",
+          "protocol": "https",
+          "host": [
+            "portal-intl",
+            "huaweicloud",
+            "com"
+          ],
+          "path": [
+            "api",
+            "calculator",
+            "rest",
+            "cbc",
+            "portalcalculatornodeservice",
+            "v4",
+            "api",
+            "productInfo"
+          ],
+          "query": [
+            {
+              "key": "urlPath",
+              "value": "ecs"
+            },
+            {
+              "key": "tag",
+              "value": "general.online.portal"
+            },
+            {
+              "key": "region",
+              "value": "ap-southeast-3"
+            },
+            {
+              "key": "tab",
+              "value": "detail"
+            },
+            {
+              "key": "sign",
+              "value": "common"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Edit cart",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "accept",
+            "value": "application/json, text/plain, */*"
+          },
+          {
+            "key": "accept-language",
+            "value": "en-US,en;q=0.9"
+          },
+          {
+            "key": "content-type",
+            "value": "application/json"
+          },
+          {
+            "key": "csrf",
+            "value": "e045f84e-9a2a-4663-9bbc-a2cbce221207"
+          },
+          {
+            "key": "origin",
+            "value": "https://www.huaweicloud.com"
+          },
+          {
+            "key": "priority",
+            "value": "u=1, i"
+          },
+          {
+            "key": "referer",
+            "value": "https://www.huaweicloud.com/intl/en-us/pricing/calculator.html?tempShareList=true"
+          },
+          {
+            "key": "sec-ch-ua",
+            "value": "\"Google Chrome\";v=\"143\", \"Chromium\";v=\"143\", \"Not A(Brand\";v=\"24\""
+          },
+          {
+            "key": "sec-ch-ua-mobile",
+            "value": "?0"
+          },
+          {
+            "key": "sec-ch-ua-platform",
+            "value": "\"Windows\""
+          },
+          {
+            "key": "sec-fetch-dest",
+            "value": "empty"
+          },
+          {
+            "key": "sec-fetch-mode",
+            "value": "cors"
+          },
+          {
+            "key": "sec-fetch-site",
+            "value": "same-site"
+          },
+          {
+            "key": "user-agent",
+            "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+          },
+          {
+            "key": "wise-groupid",
+            "value": "3.d3d3Lmh1YXdlaWNsb3VkLmNvbS9pbnRsL2VuLXVzL3ByaWNpbmcvY2FsY3VsYXRvci5odG1sIy9lY3N8MWM2NzY2MjAxOGJkMTFmMWE0NjE3MzY1MGY1YzdjMjR8RmluaXNo.5cbb2192fb2240d5815af45f08209805.DJD29Re0.1772734549608"
+          },
+          {
+            "key": "Cookie",
+            "value": "vk=387aaa60-f75f-4371-9d05-373e4aae1d6a; cbc-sid=204937c93812c7d04fe7af1b8206de94fa36bab51f31397c4bdb1e30b52817039a72b7e6e70236d0377e; _frid=49a2987da4c44f78aa297020cb1bbb33; uba_countrycode=BR; _ga=GA1.2.51837132.1744208621; uba_vk=387aaa60-f75f-4371-9d05-373e4aae1d6a; ua=5cbb2192fb2240d5815af45f08209805; deviceid=DJD29Re0; Hm_lvt_e7a90fbb918d40aec64d1170a5ca608f=1760041539,1760642635,1762350782; recentServices=[\"CCI2\",\"obs\",\"nat\",\"elb\",\"ecm\",\"CCE\"]; HWWAFSESID=baedfdf4faa099fd85; HWWAFSESTIME=1769519680437; SessionID=c906c4fb-7efd-4aa7-837c-f10eea144e19; ad_sc=; ad_mdm=; ad_cmp=; ad_ctt=; ad_tm=; ad_adp=; user_tag=f04e1d3b40c34c13aa9f14118f7217e5; domain_tag=5cbb2192fb2240d5815af45f08209805; popup_max_time=60; masked_phone=; masked_user=g****7609; masked_domain=g****7609; usite=intl; x-framework-ob=hec-hk; SID=Set2; ECO_INTL_ID=RZrHMbihGPfugxER5HO1sA.._-_1769538917_-_VdaC2dzhVANLClQ9MG0vP0fF28o.; csrf-eco=01b5facd-73cd-4409-9d8f-19749b5174ed; console_cftk=Q7MF-N7A2-O2F0-AQ9S-VNSB-02P0-IQDV-G4MH; HWS_ID=X0P_e7eY3bJEB4fEPtx6pw.._-_1769798043_-_QFK0OhOgXT3iXKAHCxmncRNeGew.; _gid=GA1.2.984975513.1772476382; cf=comparecloud.in; browserCheckResult=A; g50047609_g50047609_cfProjectName=sa-brazil-1; agreed-cookiepolicy=1; cfLatestRecordTimestamp=1772651049788; _fr_ssid=99190f51f0ce4d71a178f8847d0e9821; locale=en-us; HWS_INTL_ID=yn8MXsCY2OlRJ0wo5-YaPA.._-_1772736297_-_4pi_UDOny12hl7mi9gJyroWkPhU.; csrf=e045f84e-9a2a-4663-9bbc-a2cbce221207; _gat=1"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"billingMode\":\"cart.shareList.billingModeTotal\",\"cartListData\":[{\"buyUrl\":\"https://console-intl.huaweicloud.com/ecm/?region=sa-brazil-1&locale=en-us&charging=0&flavor=x1.2u.4g&imageId=5e98a4a3-0d2e-4003-88ae-0a5619cce96a&sysdisk=GPSSD:40&datadisk=&iptype=&ipcharging=&bwsize=&vmcount=1&period=#/ecs/createVm\",\"rewriteValue\":{\"global_TITLE\":{\"tag\":\"general.online.portal\"},\"global_DESCRIPTION\":\"Roberto\",\"global_REGIONINFO\":{\"region\":\"sa-brazil-1\",\"locationType\":\"commonAZ\",\"chargeMode\":\"ONDEMAND\"},\"template_RENDER\":{\"calculator_ecs_radio\":{\"arch\":\"dataInfo_32_\",\"vmType\":\"dataInfo_1_\",\"generation\":\"X1\",\"cpu\":\"2dataInfo_36_\",\"mem\":\"4BSSUNIT.pluralUnit.102\"},\"calculator_eip_switch\":{\"UNSET_Switch\":\"calc_15_\"},\"calculator_ims_select\":{\"__platform\":\"AlmaLinux\",\"name\":\"AlmaLinux 9.4 64bit\"},\"calculator_evs_stepper\":{\"calculator_evs_stepper_main\":{\"type\":\"dataInfo_43_\",\"UNSET_Stepper_0\":{\"measureId\":17,\"measureValue\":40,\"measureNameBeforeTrans\":\"\",\"measurePluralNameBeforeTrans\":\"\",\"transRate\":\"\",\"transTarget\":\"\"}}}},\"global_ONDEMANDTIME\":{\"UNSET_Stepper_0\":{\"measureId\":4,\"measureValue\":744,\"measureNameBeforeTrans\":\"\",\"measurePluralNameBeforeTrans\":\"\",\"transRate\":\"\",\"transTarget\":\"\"}},\"global_QUANTITY\":{\"UNSET_Stepper_0\":{\"measureId\":41,\"measureValue\":1,\"measureNameBeforeTrans\":\"calc_29_\",\"measurePluralNameBeforeTrans\":\"calc_30_\",\"transRate\":\"\",\"transTarget\":\"\"}}},\"selectedProduct\":{\"region\":\"sa-brazil-1\",\"locationType\":\"commonAZ\",\"chargeMode\":\"ONDEMAND\",\"tag\":\"general.online.portal\",\"serviceCode\":\"ecs\",\"timeTag\":1772734538372,\"chargeModeName\":\"ONDEMAND\",\"periodType\":4,\"periodNum\":1,\"subscriptionNum\":1,\"purchaseTime\":{\"measureValue\":744,\"measureId\":4,\"measureNameBeforeTrans\":\"\",\"measurePluralNameBeforeTrans\":\"\"},\"purchaseNum\":{\"measureValue\":1,\"measureId\":41,\"measureNameBeforeTrans\":\"calc_29_\",\"measurePluralNameBeforeTrans\":\"calc_30_\"},\"description\":\"Roberto\",\"productAllInfos\":[{\"resourceType\":\"hws.resource.type.vm\",\"cloudServiceType\":\"hws.service.type.ec2\",\"resourceSpecCode\":\"x1.2u.4g.linux\",\"productSpecSysDesc\":\"Memory:4096MB;vCPUs:2CORE;CPU Architecture:x86;Type:General Computing;System Disk:40GB;Series:X1;Image:Linux;Spot Duartion:On Demand, Period, Dynamic Price Spot;Local Disk:No Local-Disk;Remark:normal;accelerator card:No Accelerator Card\",\"resourceSpecType\":\"x1\",\"periodList\":0,\"_skuInfo\":[\"Memory: 4096BSSUNIT.pluralUnit.21\",\"vCPUs: 2BSSUNIT.pluralUnit.23\",\"CPU Architecture: x86\",\"Type: General Computing\",\"System Disk: 40BSSUNIT.pluralUnit.17\",\"Series: X1\",\"Image: Linux\",\"Spot Duartion: On Demand, Period, Dynamic Price Spot\",\"Local Disk: No Local-Disk\",\"Remark: normal\",\"accelerator card: No Accelerator Card\"],\"mem\":\"4BSSUNIT.pluralUnit.102\",\"cpu\":\"2dataInfo_36_\",\"instanceArch\":\"x86\",\"performType\":\"General Computing\",\"disk\":\"40BSSUNIT.pluralUnit.17\",\"series\":\"X1\",\"image\":\"Linux\",\"spot_duartion\":\"On Demand, Period, Dynamic Price Spot\",\"localDisk\":\"No Local-Disk\",\"type\":\"normal\",\"acceleratorCard\":\"No Accelerator Card\",\"arch\":\"dataInfo_32_\",\"generation\":\"X1\",\"spec\":\"x1.2u.4g\",\"physical\":\"dataInfo_44_\",\"vmType\":\"dataInfo_1_\",\"generationType\":\"dataInfo_1_ X1 dataInfo_44_\",\"imageSpec\":\"linux\",\"riResourceSepc\":\"x1.2u.4g\",\"addToList_title\":\"calc_2_\",\"addToList_product\":\"dataInfo_32_ | dataInfo_1_ | x1.2u.4g | 2dataInfo_36_ | 4BSSUNIT.pluralUnit.102\",\"bakPlanList\":[{\"productId\":\"OFFI1012619014602915849\",\"billingMode\":\"ONDEMAND\",\"siteCode\":\"HWC\",\"periodNum\":null,\"billingEvent\":\"event.type.vmduration\",\"measureUnitStep\":1,\"measureUnit\":4,\"usageFactor\":\"Duration\",\"usageMeasureId\":6,\"amount\":0.0644}],\"productId\":\"OFFI1012619014602915849\",\"billingMode\":\"ONDEMAND\",\"siteCode\":\"HWC\",\"periodNum\":null,\"billingEvent\":\"event.type.vmduration\",\"measureUnitStep\":1,\"measureUnit\":4,\"usageFactor\":\"Duration\",\"usageMeasureId\":4,\"amount\":0.0644,\"productNum\":1,\"inquiryTag\":\"normal\",\"selfProductNum\":1,\"transRate\":\"\",\"transTarget\":\"\",\"usageValue\":744,\"usageMeasureName\":\"\",\"usageMeasurePluralName\":\"\",\"selectIndex\":0,\"inquiryResult\":{\"id\":\"1772734538372-0-OFFI1012619014602915849\",\"productId\":\"OFFI1012619014602915849\",\"amount\":47.9136,\"discountAmount\":0,\"originalAmount\":47.9136,\"perAmount\":null,\"perDiscountAmount\":null,\"perOriginalAmount\":null,\"perPeriodType\":null,\"measureId\":1,\"extendParams\":null}},{\"type\":[\"c3\",\"d2\",\"d3\",\"hc1\",\"hc2\",\"h3\",\"t6\",\"s2\",\"s3\",\"m2\",\"m3\",\"sn3\",\"s6\",\"cc3\",\"t2\",\"s7\",\"c7n\",\"s7n\",\"m7n\",\"x1\",\"x0\",\"m6\",\"m7\",\"d6\",\"c6ne\",\"d7\",\"c7e\",\"c7ne\",\"c7t\",\"m7ne\",\"c3ne\",\"c6\",\"c6s\",\"c7\",\"c9\",\"m9\",\"m3ne\",\"h3ne\",\"d3ne\",\"ac6\",\"ac7\",\"ac8\",\"ac9\",\"ac9s\",\"am7\",\"am8\",\"x1e\",\"x2e\"],\"min_ram\":\"\",\"id\":\"5e98a4a3-0d2e-4003-88ae-0a5619cce96a\",\"__os_type\":\"Linux\",\"__platform\":\"AlmaLinux\",\"__os_bit\":\"64\",\"name\":\"AlmaLinux 9.4 64bit\",\"__account_code\":\"\",\"__productcode\":\"\",\"addToList_title\":\"calc_4_\",\"addToList_product\":\"AlmaLinux | AlmaLinux 9.4 64bit\",\"productNum\":744,\"inquiryTag\":\"localImage\",\"selfProductNum\":1,\"transRate\":\"\",\"transTarget\":\"\",\"durationNum\":744,\"selectIndex\":1,\"inquiryResult\":{\"amount\":0,\"originalAmount\":0,\"discountAmount\":0,\"productId\":\"noId\",\"id\":\"1772734538372-1-noId\"}},{\"resourceType\":\"hws.resource.type.volume\",\"cloudServiceType\":\"hws.service.type.ebs\",\"resourceSpecCode\":\"GPSSD\",\"productSpecSysDesc\":\"Disk Specifications:General Purpose SSD\",\"resourceSpecType\":\"GPSSD\",\"periodList\":4,\"_skuInfo\":[\"Disk Specifications: General Purpose SSD\",\"Disk Size: nullBSSUNIT.unit.17\"],\"volumeType\":\"General Purpose SSD\",\"linearDisk\":\"nullBSSUNIT.unit.17\",\"billingItem\":\"detail_68_\",\"type\":\"dataInfo_43_\",\"info\":\"dataInfo_26_\",\"specifications\":\"dataInfo_27_\",\"tableUnit\":\"detail_26_\",\"resourceSize\":40,\"resouceSizeMeasureId\":17,\"resourceMeasureName\":\"\",\"resourceMeasurePluralName\":\"\",\"addToList_title\":\"calc_11_\",\"addToList_product\":\"dataInfo_43_ | 40BSSUNIT.pluralUnit.17\",\"_productType\":\"main\",\"bakPlanList\":[{\"productId\":\"00301-247376-0--0\",\"billingMode\":\"ONDEMAND\",\"siteCode\":\"HWC\",\"periodNum\":null,\"billingEvent\":\"event.type.volumeduration\",\"measureUnitStep\":1,\"measureUnit\":4,\"usageFactor\":\"Duration\",\"usageMeasureId\":6,\"amount\":0.000247}],\"productId\":\"00301-247376-0--0\",\"billingMode\":\"ONDEMAND\",\"siteCode\":\"HWC\",\"periodNum\":null,\"billingEvent\":\"event.type.volumeduration\",\"measureUnitStep\":1,\"measureUnit\":4,\"usageFactor\":\"Duration\",\"usageMeasureId\":4,\"amount\":0.000247,\"productNum\":1,\"inquiryTag\":\"normal\",\"selfProductNum\":1,\"transRate\":\"\",\"transTarget\":\"\",\"usageValue\":744,\"usageMeasureName\":\"\",\"usageMeasurePluralName\":\"\",\"selectIndex\":2,\"inquiryResult\":{\"id\":\"1772734538372-2-00301-247376-0--0\",\"productId\":\"00301-247376-0--0\",\"amount\":7.35072,\"discountAmount\":0,\"originalAmount\":7.35072,\"perAmount\":null,\"perDiscountAmount\":null,\"perOriginalAmount\":null,\"perPeriodType\":null,\"measureId\":1,\"extendParams\":null}}],\"amount\":55.26432,\"discountAmount\":0,\"originalAmount\":55.26432,\"_cartId\":\"816921A305FB51AE35025DAA4BFB1E4C\",\"_customTitle\":\"custom.ecs 1\"}}],\"name\":\"test\",\"totalPrice\":{\"amount\":55.26432,\"discountAmount\":0,\"originalAmount\":55.26432}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://portal-intl.huaweicloud.com/api/calculator/rest/cbc/portalcalculatornodeservice/v4/api/share/update?key=1c67662018bd11f1a46173650f5c7c24",
+          "protocol": "https",
+          "host": [
+            "portal-intl",
+            "huaweicloud",
+            "com"
+          ],
+          "path": [
+            "api",
+            "calculator",
+            "rest",
+            "cbc",
+            "portalcalculatornodeservice",
+            "v4",
+            "api",
+            "share",
+            "update"
+          ],
+          "query": [
+            {
+              "key": "key",
+              "value": "1c67662018bd11f1a46173650f5c7c24"
+            }
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}
