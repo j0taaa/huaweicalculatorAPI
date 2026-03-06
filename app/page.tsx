@@ -242,6 +242,42 @@ function getFlavorLabel(flavor: ProductFlavor): string {
   return bits.length ? bits.join(" / ") : flavor.resourceSpecCode;
 }
 
+function getFlavorCpuCount(flavor: ProductFlavor): number {
+  const spec = flavor.productSpecSysDesc ?? "";
+  const specMatch = spec.match(/vCPUs:(\d+)CORE/i);
+  if (specMatch) {
+    return Number.parseInt(specMatch[1], 10);
+  }
+
+  const cpuText = flavor.cpu ?? "";
+  const cpuMatch = cpuText.match(/(\d+)/);
+  return cpuMatch ? Number.parseInt(cpuMatch[1], 10) : 0;
+}
+
+function getFlavorMemoryGb(flavor: ProductFlavor): number {
+  const spec = flavor.productSpecSysDesc ?? "";
+  const mbMatch = spec.match(/Memory:(\d+)MB/i);
+  if (mbMatch) {
+    return Number.parseInt(mbMatch[1], 10) / 1024;
+  }
+
+  const memText = flavor.mem ?? "";
+  const memMatch = memText.match(/(\d+(?:\.\d+)?)/);
+  return memMatch ? Number.parseFloat(memMatch[1]) : 0;
+}
+
+function getFlavorPrice(flavor: ProductFlavor): number {
+  if (typeof flavor.inquiryResult?.amount === "number") {
+    return flavor.inquiryResult.amount;
+  }
+
+  if (typeof flavor.amount === "number") {
+    return flavor.amount;
+  }
+
+  return Number.POSITIVE_INFINITY;
+}
+
 function getFlavorSpec(flavor: ProductFlavor): string {
   if (typeof flavor.spec === "string" && flavor.spec) {
     return flavor.spec;
@@ -451,6 +487,9 @@ export default function Home() {
 
   const [catalogRegion, setCatalogRegion] = useState("ap-southeast-3");
   const [catalogSearch, setCatalogSearch] = useState("");
+  const [catalogMinVcpu, setCatalogMinVcpu] = useState("0");
+  const [catalogMinRam, setCatalogMinRam] = useState("0");
+  const [catalogSort, setCatalogSort] = useState("price-asc");
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogResult, setCatalogResult] = useState<ReplayResult | null>(null);
   const [selectedFlavorCode, setSelectedFlavorCode] = useState("");
@@ -537,14 +576,22 @@ export default function Home() {
 
   const normalizedCookie = extractMinimalCookie(cookie);
   const flavors = getCatalogFlavors(catalogResult?.response.body);
-  const filteredFlavors = flavors.filter((flavor) => {
-    if (!catalogSearch.trim()) {
-      return true;
-    }
+  const filteredFlavors = flavors
+    .filter((flavor) => {
+      if (!catalogSearch.trim()) {
+        return true;
+      }
 
-    const haystack = `${flavor.resourceSpecCode} ${flavor.productSpecDesc ?? ""} ${flavor.productSpecSysDesc ?? ""} ${flavor.performType ?? ""}`.toLowerCase();
-    return haystack.includes(catalogSearch.toLowerCase());
-  });
+      const haystack = `${flavor.resourceSpecCode} ${flavor.productSpecDesc ?? ""} ${flavor.productSpecSysDesc ?? ""} ${flavor.performType ?? ""}`.toLowerCase();
+      return haystack.includes(catalogSearch.toLowerCase());
+    })
+    .filter((flavor) => getFlavorCpuCount(flavor) >= (Number.parseInt(catalogMinVcpu, 10) || 0))
+    .filter((flavor) => getFlavorMemoryGb(flavor) >= (Number.parseInt(catalogMinRam, 10) || 0))
+    .sort((left, right) => {
+      const leftPrice = getFlavorPrice(left);
+      const rightPrice = getFlavorPrice(right);
+      return catalogSort === "price-desc" ? rightPrice - leftPrice : leftPrice - rightPrice;
+    });
   const selectedFlavor = getSelectedFlavor(flavors, selectedFlavorCode);
   const estimateBody = estimateResult?.response.body as PriceResponseBody | undefined;
   const stagedTotal = calculatorItems.reduce((sum, item) => sum + item.totalAmount, 0);
@@ -981,40 +1028,105 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="mt-4 flex flex-wrap items-center gap-3">
-                <input
-                  className="field max-w-md"
-                  onChange={(event) => setCatalogSearch(event.target.value)}
-                  placeholder="Search by flavor, CPU, memory, or workload"
-                  value={catalogSearch}
-                />
-                <span className="pill">{filteredFlavors.length} shown</span>
-              </div>
+              <div className="mt-5 grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
+                <div className="soft-panel">
+                  <p className="section-title">Filter flavors</p>
+                  <label className="label mt-3" htmlFor="catalog-search">
+                    Search
+                  </label>
+                  <input
+                    className="field"
+                    id="catalog-search"
+                    onChange={(event) => setCatalogSearch(event.target.value)}
+                    placeholder="Flavor, workload, or spec"
+                    value={catalogSearch}
+                  />
 
-              <div className="mt-5 grid gap-3 md:grid-cols-2">
-                {filteredFlavors.slice(0, 24).map((flavor) => (
-                  <button
-                    key={flavor.resourceSpecCode}
-                    className={`flavor-card text-left ${selectedFlavorCode === flavor.resourceSpecCode ? "cart-card-active" : ""}`}
-                    onClick={() => {
-                      setSelectedFlavorCode(flavor.resourceSpecCode);
-                      setConfigTitle(flavor.resourceSpecCode);
-                      setEstimateResult(null);
-                    }}
-                    type="button"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-semibold text-slate-900">{flavor.resourceSpecCode}</p>
-                        <p className="mt-1 text-sm text-slate-600">{getFlavorLabel(flavor)}</p>
-                      </div>
-                      <span className="pill">{flavor.series ?? "ECS"}</span>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                    <div>
+                      <label className="label" htmlFor="catalog-min-vcpu">
+                        Min vCPU
+                      </label>
+                      <input
+                        className="field"
+                        id="catalog-min-vcpu"
+                        onChange={(event) => setCatalogMinVcpu(event.target.value)}
+                        value={catalogMinVcpu}
+                      />
                     </div>
-                    <p className="mt-3 text-sm leading-6 text-slate-600">
-                      {flavor.productSpecDesc || flavor.productSpecSysDesc || "No description available"}
+                    <div>
+                      <label className="label" htmlFor="catalog-min-ram">
+                        Min RAM (GB)
+                      </label>
+                      <input
+                        className="field"
+                        id="catalog-min-ram"
+                        onChange={(event) => setCatalogMinRam(event.target.value)}
+                        value={catalogMinRam}
+                      />
+                    </div>
+                  </div>
+
+                  <label className="label mt-3" htmlFor="catalog-sort">
+                    Sort by price
+                  </label>
+                  <select
+                    className="field"
+                    id="catalog-sort"
+                    onChange={(event) => setCatalogSort(event.target.value)}
+                    value={catalogSort}
+                  >
+                    <option value="price-asc">Lowest first</option>
+                    <option value="price-desc">Highest first</option>
+                  </select>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <span className="pill">{filteredFlavors.length} shown</span>
+                    <span className="pill">{flavors.length} total</span>
+                  </div>
+                </div>
+
+                <div className="soft-panel">
+                  <div className="flavor-matrix-header">
+                    <span>Flavor</span>
+                    <span>vCPU</span>
+                    <span>RAM</span>
+                    <span>Type</span>
+                    <span>Base price</span>
+                  </div>
+
+                  <div className="mt-2 space-y-2">
+                    {filteredFlavors.map((flavor) => (
+                      <button
+                        key={flavor.resourceSpecCode}
+                        className={`flavor-row ${selectedFlavorCode === flavor.resourceSpecCode ? "flavor-row-active" : ""}`}
+                        onClick={() => {
+                          setSelectedFlavorCode(flavor.resourceSpecCode);
+                          setConfigTitle(flavor.resourceSpecCode);
+                          setEstimateResult(null);
+                        }}
+                        type="button"
+                      >
+                        <div>
+                          <p className="font-semibold text-slate-900">{flavor.resourceSpecCode}</p>
+                          <p className="mt-1 text-xs text-slate-500">{flavor.series ?? "ECS"} / {flavor.instanceArch ?? "x86"}</p>
+                        </div>
+                        <div className="text-sm text-slate-700">{getFlavorCpuCount(flavor)}</div>
+                        <div className="text-sm text-slate-700">{getFlavorMemoryGb(flavor).toFixed(0)} GB</div>
+                        <div className="text-sm text-slate-700">{flavor.performType ?? "General"}</div>
+                        <div className="text-sm font-semibold text-slate-900">
+                          {Number.isFinite(getFlavorPrice(flavor)) ? getFlavorPrice(flavor).toFixed(4) : "-"}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+
+                  {!filteredFlavors.length ? (
+                    <p className="mt-4 text-sm text-slate-500">
+                      No flavors match the current filters. Lower the minimum vCPU or RAM threshold.
                     </p>
-                  </button>
-                ))}
+                  ) : null}
+                </div>
               </div>
             </div>
 

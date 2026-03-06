@@ -2,8 +2,8 @@
 
 :root {
   --ink: #112031;
-  --card: rgba(255, 255, 255, 0.76);
-  --card-strong: rgba(255, 255, 255, 0.9);
+  --card: rgba(255, 255, 255, 0.84);
+  --card-strong: rgba(255, 255, 255, 0.96);
   --line: rgba(148, 163, 184, 0.28);
   --accent: #0f766e;
   --accent-2: #1d4ed8;
@@ -29,8 +29,8 @@ pre,
 .session-panel {
   border: 1px solid var(--line);
   background: var(--card);
-  backdrop-filter: blur(20px);
-  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.07);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.06);
 }
 
 .hero-card {
@@ -136,6 +136,54 @@ pre,
 .cart-card {
   border-radius: 1rem;
   padding: 0.95rem;
+}
+
+.flavor-matrix-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) 0.45fr 0.55fr 0.95fr 0.65fr;
+  gap: 0.75rem;
+  border-bottom: 1px solid rgba(203, 213, 225, 0.75);
+  padding: 0 0.1rem 0.75rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.flavor-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1.45fr) 0.45fr 0.55fr 0.95fr 0.65fr;
+  gap: 0.75rem;
+  align-items: center;
+  border: 1px solid rgba(203, 213, 225, 0.7);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.98);
+  padding: 0.9rem 1rem;
+  text-align: left;
+  transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+}
+
+.flavor-row:hover {
+  transform: translateY(-1px);
+  border-color: rgba(37, 99, 235, 0.35);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05);
+}
+
+.flavor-row-active {
+  border-color: rgba(37, 99, 235, 0.4);
+  background: linear-gradient(180deg, rgba(239, 246, 255, 0.98), rgba(255, 255, 255, 0.98));
+}
+
+@media (max-width: 900px) {
+  .flavor-matrix-header {
+    display: none;
+  }
+
+  .flavor-row {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 .cart-card {

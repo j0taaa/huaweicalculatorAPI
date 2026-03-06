@@ -63,6 +63,7 @@ docker run --rm -p 3000:3000 huaweicalculatorapi:latest
 - Accepts a full cookie string, `HWS_INTL_ID=...`, or only the `HWS_INTL_ID` value and auto-normalizes it.
 - Create or select a target Huawei cart.
 - Browse and search ECS flavors collected from the product catalog API.
+- Filter the flavor matrix by minimum vCPU and RAM, and sort it by base price.
 - Configure region, quantity, hours, and system disk before pricing.
 - Estimate ECS monthly price from the pricing API.
 - Stage multiple products locally in a calculator cart.
