@@ -38,6 +38,8 @@ export type ProductFlavor = {
   planList?: Array<{
     productId?: string;
     billingMode?: string;
+    originType?: string;
+    amountType?: string;
     siteCode?: string;
     periodNum?: number | null;
     billingEvent?: string;
@@ -46,10 +48,13 @@ export type ProductFlavor = {
     usageFactor?: string;
     usageMeasureId?: number;
     amount?: number;
+    [key: string]: unknown;
   }>;
   bakPlanList?: Array<{
     productId?: string;
     billingMode?: string;
+    originType?: string;
+    amountType?: string;
     siteCode?: string;
     periodNum?: number | null;
     billingEvent?: string;
@@ -58,6 +63,7 @@ export type ProductFlavor = {
     usageFactor?: string;
     usageMeasureId?: number;
     amount?: number;
+    [key: string]: unknown;
   }>;
   inquiryResult?: {
     id?: string;
@@ -92,6 +98,8 @@ export type ProductDisk = {
   planList?: Array<{
     productId?: string;
     billingMode?: string;
+    originType?: string;
+    amountType?: string;
     siteCode?: string;
     periodNum?: number | null;
     billingEvent?: string;
@@ -100,10 +108,13 @@ export type ProductDisk = {
     usageFactor?: string;
     usageMeasureId?: number;
     amount?: number;
+    [key: string]: unknown;
   }>;
   bakPlanList?: Array<{
     productId?: string;
     billingMode?: string;
+    originType?: string;
+    amountType?: string;
     siteCode?: string;
     periodNum?: number | null;
     billingEvent?: string;
@@ -112,6 +123,7 @@ export type ProductDisk = {
     usageFactor?: string;
     usageMeasureId?: number;
     amount?: number;
+    [key: string]: unknown;
   }>;
   inquiryResult?: {
     id?: string;
@@ -150,6 +162,15 @@ type CatalogPlan = {
   amount?: number;
   originType?: string;
   amountType?: string;
+  productId?: string;
+  siteCode?: string;
+  periodNum?: number | null;
+  billingEvent?: string;
+  measureUnitStep?: number | null;
+  measureUnit?: number | null;
+  usageFactor?: string;
+  usageMeasureId?: number;
+  [key: string]: unknown;
 };
 
 type CatalogPricedItem = {
@@ -172,6 +193,107 @@ function getFlavorPlanCount(flavor: ProductFlavor): number {
 
 function getCatalogPlans(item: CatalogPricedItem): CatalogPlan[] {
   return [...(item.planList ?? []), ...(item.bakPlanList ?? [])];
+}
+
+function isPresentValue(value: unknown): boolean {
+  if (value === undefined || value === null) {
+    return false;
+  }
+
+  if (typeof value === "string") {
+    return value.trim().length > 0;
+  }
+
+  return true;
+}
+
+function countPresentValues(record: Record<string, unknown>): number {
+  return Object.values(record).filter(isPresentValue).length;
+}
+
+function getCatalogPlanKey(plan: CatalogPlan): string {
+  return JSON.stringify([
+    plan.billingMode ?? "",
+    plan.originType ?? "",
+    plan.amountType ?? "",
+    plan.productId ?? "",
+    plan.siteCode ?? "",
+    plan.periodNum ?? "",
+    plan.billingEvent ?? "",
+    plan.measureUnitStep ?? "",
+    plan.measureUnit ?? "",
+    plan.usageFactor ?? "",
+    plan.usageMeasureId ?? "",
+    plan.amount ?? "",
+    typeof plan.planId === "string" ? plan.planId : "",
+    typeof plan.skuCode === "string" ? plan.skuCode : "",
+    typeof plan.paymentType === "string" ? plan.paymentType : "",
+    typeof plan.paymentTypeKey === "string" ? plan.paymentTypeKey : "",
+  ]);
+}
+
+function mergeCatalogPlans(
+  primary: CatalogPlan[] | undefined,
+  secondary: CatalogPlan[] | undefined,
+): CatalogPlan[] | undefined {
+  const mergedPlans = [...(primary ?? []), ...(secondary ?? [])];
+  if (!mergedPlans.length) {
+    return undefined;
+  }
+
+  const uniquePlans = new Map<string, CatalogPlan>();
+  for (const plan of mergedPlans) {
+    const key = getCatalogPlanKey(plan);
+    const current = uniquePlans.get(key);
+    if (!current || countPresentValues(plan) > countPresentValues(current)) {
+      uniquePlans.set(key, plan);
+    }
+  }
+
+  return [...uniquePlans.values()];
+}
+
+function mergeInquiryResult<T extends { [key: string]: unknown }>(
+  primary: T | undefined,
+  secondary: T | undefined,
+): T | undefined {
+  if (!primary) {
+    return secondary;
+  }
+
+  if (!secondary) {
+    return primary;
+  }
+
+  const merged: Record<string, unknown> = {};
+  const keys = new Set([...Object.keys(secondary), ...Object.keys(primary)]);
+  for (const key of keys) {
+    const primaryValue = primary[key];
+    const secondaryValue = secondary[key];
+    merged[key] = isPresentValue(primaryValue) ? primaryValue : secondaryValue;
+  }
+
+  return merged as T;
+}
+
+function mergeCatalogRecords<T extends Record<string, unknown>>(
+  primary: T,
+  secondary: T,
+): T {
+  const merged: Record<string, unknown> = {};
+  const keys = new Set([...Object.keys(secondary), ...Object.keys(primary)]);
+
+  for (const key of keys) {
+    if (key === "planList" || key === "bakPlanList" || key === "inquiryResult") {
+      continue;
+    }
+
+    const primaryValue = primary[key];
+    const secondaryValue = secondary[key];
+    merged[key] = isPresentValue(primaryValue) ? primaryValue : secondaryValue;
+  }
+
+  return merged as T;
 }
 
 function getLowestPlanAmount(plans: CatalogPlan[]): number {
@@ -217,13 +339,6 @@ function getCatalogItemBasePrice(item: CatalogPricedItem, pricingMode: CatalogPr
 
   if (pricingMode === "ONDEMAND" && typeof item.amount === "number") {
     return item.amount;
-  }
-
-  if (pricingMode === "ONDEMAND") {
-    const fallbackPlan = getCatalogPlans(item).find((plan) => typeof plan.amount === "number");
-    if (typeof fallbackPlan?.amount === "number") {
-      return fallbackPlan.amount;
-    }
   }
 
   if (pricingMode === "ONDEMAND" && typeof item.inquiryResult?.perAmount === "number") {
@@ -283,9 +398,13 @@ export function dedupeCatalogFlavors(flavors: ProductFlavor[]): ProductFlavor[] 
       continue;
     }
 
-    if (shouldPreferFlavor(flavor, current)) {
-      uniqueFlavors.set(code, flavor);
-    }
+    const preferred = shouldPreferFlavor(flavor, current) ? flavor : current;
+    const fallback = preferred === flavor ? current : flavor;
+    const merged = mergeCatalogRecords(preferred, fallback);
+    merged.planList = mergeCatalogPlans(preferred.planList, fallback.planList);
+    merged.bakPlanList = mergeCatalogPlans(preferred.bakPlanList, fallback.bakPlanList);
+    merged.inquiryResult = mergeInquiryResult(preferred.inquiryResult, fallback.inquiryResult);
+    uniqueFlavors.set(code, merged);
   }
 
   return [...uniqueFlavors.values()];
@@ -321,9 +440,13 @@ export function dedupeCatalogDisks(disks: ProductDisk[]): ProductDisk[] {
       continue;
     }
 
-    if (shouldPreferDisk(disk, current)) {
-      uniqueDisks.set(code, disk);
-    }
+    const preferred = shouldPreferDisk(disk, current) ? disk : current;
+    const fallback = preferred === disk ? current : disk;
+    const merged = mergeCatalogRecords(preferred, fallback);
+    merged.planList = mergeCatalogPlans(preferred.planList, fallback.planList);
+    merged.bakPlanList = mergeCatalogPlans(preferred.bakPlanList, fallback.bakPlanList);
+    merged.inquiryResult = mergeInquiryResult(preferred.inquiryResult, fallback.inquiryResult);
+    uniqueDisks.set(code, merged);
   }
 
   return [...uniqueDisks.values()];

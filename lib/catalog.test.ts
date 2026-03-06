@@ -47,13 +47,22 @@ describe("catalog helpers", () => {
       inquiryResult: { perAmount: 5, amount: 50 },
     }))).toBe(5);
     expect(getFlavorBasePrice(makeFlavor("ecs.5"))).toBe(Number.POSITIVE_INFINITY);
+    expect(getFlavorBasePrice(makeFlavor("ecs.6", {
+      planList: [
+        { billingMode: "RI", originType: "price", amount: 0 },
+        { billingMode: "RI", originType: "perPrice", amount: 45.04 },
+      ],
+    }))).toBe(Number.POSITIVE_INFINITY);
   });
 
-  test("dedupeCatalogFlavors keeps one flavor per code and prefers the cheaper duplicate", () => {
+  test("dedupeCatalogFlavors merges pricing plans across duplicate rows", () => {
     const deduped = dedupeCatalogFlavors([
       makeFlavor("c9.large", {
         productId: "expensive",
-        bakPlanList: [{ billingMode: "ONDEMAND", amount: 9 }],
+        planList: [
+          { billingMode: "MONTHLY", amount: 90 },
+          { billingMode: "ONDEMAND", amount: 9 },
+        ],
       }),
       makeFlavor("m9.large", {
         productId: "single",
@@ -61,21 +70,40 @@ describe("catalog helpers", () => {
       }),
       makeFlavor("c9.large", {
         productId: "cheap",
-        bakPlanList: [{ billingMode: "ONDEMAND", amount: 5 }],
+        planList: [
+          { billingMode: "RI", originType: "price", amount: 0 },
+          { billingMode: "RI", originType: "perPrice", amount: 40 },
+        ],
+      }),
+      makeFlavor("c9.large", {
+        productId: "yearly",
+        planList: [{ billingMode: "YEARLY", amount: 800 }],
       }),
     ]);
 
     expect(deduped).toHaveLength(2);
     expect(deduped.map((flavor) => flavor.resourceSpecCode)).toEqual(["c9.large", "m9.large"]);
-    expect(deduped[0]?.productId).toBe("cheap");
+    expect(deduped[0]?.productId).toBe("expensive");
+    expect(getFlavorBasePrice(deduped[0]!, "ONDEMAND")).toBe(9);
+    expect(getFlavorBasePrice(deduped[0]!, "MONTHLY")).toBe(90);
+    expect(getFlavorBasePrice(deduped[0]!, "YEARLY")).toBe(800);
+    expect(getFlavorBasePrice(deduped[0]!, "RI")).toBe(40);
   });
 
-  test("getCatalogFlavors returns deduped flavors from a catalog body", () => {
+  test("getCatalogFlavors returns merged flavors from a catalog body", () => {
     const flavors = getCatalogFlavors({
       product: {
         ec2_vm: [
-          makeFlavor("x1.small", { amount: 8 }),
-          makeFlavor("x1.small", { amount: 6 }),
+          makeFlavor("x1.small", {
+            amount: 6,
+            planList: [{ billingMode: "ONDEMAND", amount: 6 }],
+          }),
+          makeFlavor("x1.small", {
+            planList: [{ billingMode: "MONTHLY", amount: 60 }],
+          }),
+          makeFlavor("x1.small", {
+            planList: [{ billingMode: "RI", originType: "perPrice", amount: 30 }],
+          }),
           makeFlavor("x1.medium", { amount: 12 }),
         ],
       },
@@ -86,6 +114,8 @@ describe("catalog helpers", () => {
       ["x1.small", 6],
       ["x1.medium", 12],
     ]);
+    expect(getFlavorBasePrice(flavors[0]!, "MONTHLY")).toBe(60);
+    expect(getFlavorBasePrice(flavors[0]!, "RI")).toBe(30);
   });
 
   test("getDiskBasePrice prefers ONDEMAND disk plans", () => {

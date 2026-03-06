@@ -73,6 +73,11 @@ type RegionRow = { region_id: string; name: string };
 type SnapshotRow = { entry_json: string };
 type ErrorRow = { region_id: string; message: string };
 type CountRow = { count: number };
+type CatalogPriceRow = {
+  resource_spec_code: string;
+  pricing_mode: CatalogPricingMode;
+  amount: number;
+};
 
 const DEFAULT_DB_PATH = join(process.cwd(), "data", "catalog.db");
 const PRICING_MODES: CatalogPricingMode[] = ["ONDEMAND", "MONTHLY", "YEARLY", "RI"];
@@ -205,6 +210,106 @@ function toCatalogRegions(rows: RegionRow[]): CatalogRegion[] {
     id: row.region_id,
     name: row.name,
   }));
+}
+
+function buildCatalogPriceMap(rows: CatalogPriceRow[]) {
+  const priceMap = new Map<string, Partial<Record<CatalogPricingMode, number>>>();
+
+  for (const row of rows) {
+    const current = priceMap.get(row.resource_spec_code) ?? {};
+    current[row.pricing_mode] = row.amount;
+    priceMap.set(row.resource_spec_code, current);
+  }
+
+  return priceMap;
+}
+
+function ensureCatalogPlanAmount<T extends ProductFlavor | ProductDisk>(
+  item: T,
+  pricingMode: CatalogPricingMode,
+  amount: number,
+): T {
+  const next = structuredClone(item);
+  const planList = [...(next.planList ?? [])];
+  const hasPlan = planList.some((plan) => plan.billingMode === pricingMode && typeof plan.amount === "number");
+
+  if (!hasPlan) {
+    if (pricingMode === "RI") {
+      planList.push({
+        billingMode: "RI",
+        originType: "perPrice",
+        amountType: "nodeData.perPrice",
+        amount,
+      });
+    } else {
+      planList.push({
+        billingMode: pricingMode,
+        amount,
+      });
+    }
+  }
+
+  next.planList = planList;
+  if (pricingMode === "ONDEMAND") {
+    next.amount = amount;
+  }
+
+  return next;
+}
+
+export function hydrateCatalogEntryPrices(
+  entry: CachedReplayResult,
+  flavorPriceRows: CatalogPriceRow[],
+  diskPriceRows: CatalogPriceRow[],
+): CachedReplayResult {
+  const flavorPrices = buildCatalogPriceMap(flavorPriceRows);
+  const diskPrices = buildCatalogPriceMap(diskPriceRows);
+  const nextEntry = structuredClone(entry);
+  const body = nextEntry.response.body as { product?: { ec2_vm?: ProductFlavor[]; ebs_volume?: ProductDisk[] } } | null;
+
+  if (!body?.product) {
+    return nextEntry;
+  }
+
+  if (Array.isArray(body.product.ec2_vm)) {
+    body.product.ec2_vm = body.product.ec2_vm.map((flavor) => {
+      const prices = flavorPrices.get(flavor.resourceSpecCode);
+      if (!prices) {
+        return flavor;
+      }
+
+      let nextFlavor = flavor;
+      for (const pricingMode of PRICING_MODES) {
+        const amount = prices[pricingMode];
+        if (typeof amount === "number" && Number.isFinite(amount)) {
+          nextFlavor = ensureCatalogPlanAmount(nextFlavor, pricingMode, amount);
+        }
+      }
+
+      return nextFlavor;
+    });
+  }
+
+  if (Array.isArray(body.product.ebs_volume)) {
+    body.product.ebs_volume = body.product.ebs_volume.map((disk) => {
+      const prices = diskPrices.get(disk.resourceSpecCode);
+      if (!prices) {
+        return disk;
+      }
+
+      let nextDisk = disk;
+      for (const pricingMode of PRICING_MODES) {
+        const amount = prices[pricingMode];
+        if (typeof amount === "number" && Number.isFinite(amount)) {
+          nextDisk = ensureCatalogPlanAmount(nextDisk, pricingMode, amount);
+        }
+      }
+
+      return nextDisk;
+    });
+  }
+
+  return nextEntry;
 }
 
 function getCatalogPlanPrices<T extends ProductFlavor | ProductDisk>(
@@ -411,7 +516,19 @@ export async function readCatalogRegionSnapshot(regionId: string): Promise<Cache
     return null;
   }
 
-  return JSON.parse(row.entry_json) as CachedReplayResult;
+  const entry = JSON.parse(row.entry_json) as CachedReplayResult;
+  const flavorPriceRows = db.query<CatalogPriceRow, [string]>(`
+    SELECT resource_spec_code, pricing_mode, amount
+    FROM catalog_flavor_prices
+    WHERE region_id = ?
+  `).all(regionId);
+  const diskPriceRows = db.query<CatalogPriceRow, [string]>(`
+    SELECT resource_spec_code, pricing_mode, amount
+    FROM catalog_disk_prices
+    WHERE region_id = ?
+  `).all(regionId);
+
+  return hydrateCatalogEntryPrices(entry, flavorPriceRows, diskPriceRows);
 }
 
 export async function hasAnyCatalogSnapshots(): Promise<boolean> {
