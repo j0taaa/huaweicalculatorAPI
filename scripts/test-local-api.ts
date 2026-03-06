@@ -23,6 +23,29 @@ async function main() {
     throw new Error("No templates returned by /api/templates");
   }
 
+  const catalogResponse = await fetch(`${BASE_URL}/api/catalog?region=ap-southeast-3`, { cache: "no-store" });
+  if (!catalogResponse.ok) {
+    throw new Error(`Catalog cache API failed: ${catalogResponse.status}`);
+  }
+
+  const catalogData = (await catalogResponse.json()) as {
+    response?: {
+      ok?: boolean;
+      status?: number;
+      body?: {
+        product?: {
+          ec2_vm?: unknown[];
+        };
+      };
+    };
+  };
+
+  if (!catalogData.response?.ok || !catalogData.response.body?.product?.ec2_vm?.length) {
+    throw new Error(`Catalog cache did not return flavors for ap-southeast-3: ${catalogData.response?.status ?? "unknown"}`);
+  }
+
+  console.log(`PASS Catalog cache: ${catalogData.response.status}`);
+
   for (const template of templatesData.templates) {
     const requiresSession = AUTH_REQUIRED_IDS.has(template.id);
     if (requiresSession && !sessionCookie) {

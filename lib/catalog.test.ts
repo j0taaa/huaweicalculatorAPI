@@ -1,10 +1,20 @@
 import { describe, expect, test } from "bun:test";
-import { dedupeCatalogFlavors, getCatalogFlavors, getFlavorBasePrice, type ProductFlavor } from "@/lib/catalog";
+import { buildCatalogPriceEstimate, dedupeCatalogFlavors, getCatalogFlavors, getDiskBasePrice, getFlavorBasePrice, type ProductDisk, type ProductFlavor } from "@/lib/catalog";
 
 function makeFlavor(
   resourceSpecCode: string,
   options: Partial<ProductFlavor> = {},
 ): ProductFlavor {
+  return {
+    resourceSpecCode,
+    ...options,
+  };
+}
+
+function makeDisk(
+  resourceSpecCode: string,
+  options: Partial<ProductDisk> = {},
+): ProductDisk {
   return {
     resourceSpecCode,
     ...options,
@@ -66,5 +76,60 @@ describe("catalog helpers", () => {
       ["x1.small", 6],
       ["x1.medium", 12],
     ]);
+  });
+
+  test("getDiskBasePrice prefers ONDEMAND disk plans", () => {
+    expect(getDiskBasePrice(makeDisk("GPSSD", {
+      amount: 1,
+      bakPlanList: [{ billingMode: "ONDEMAND", amount: 0.000247 }],
+    }))).toBe(0.000247);
+  });
+
+  test("buildCatalogPriceEstimate calculates VM and disk totals from cached catalog data", () => {
+    const estimate = buildCatalogPriceEstimate({
+      product: {
+        ec2_vm: [
+          makeFlavor("x1.small", {
+            productId: "vm-1",
+            bakPlanList: [{ billingMode: "ONDEMAND", amount: 0.1 }],
+          }),
+        ],
+        ebs_volume: [
+          makeDisk("GPSSD", {
+            productId: "disk-1",
+            bakPlanList: [{ billingMode: "ONDEMAND", amount: 0.01 }],
+          }),
+        ],
+      },
+    }, {
+      flavorCode: "x1.small",
+      diskType: "GPSSD",
+      diskSize: 40,
+      hours: 10,
+      quantity: 2,
+    });
+
+    expect(estimate).toEqual({
+      amount: 10,
+      discountAmount: 0,
+      originalAmount: 10,
+      currency: "USD",
+      productRatingResult: [
+        {
+          id: "cached-vm-vm-1",
+          productId: "vm-1",
+          amount: 2,
+          discountAmount: 0,
+          originalAmount: 2,
+        },
+        {
+          id: "cached-disk-disk-1",
+          productId: "disk-1",
+          amount: 8,
+          discountAmount: 0,
+          originalAmount: 8,
+        },
+      ],
+    });
   });
 });

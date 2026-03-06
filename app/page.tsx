@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
-import { getCatalogFlavors, getFlavorBasePrice, type ProductFlavor } from "@/lib/catalog";
+import { buildCatalogPriceEstimate, getCatalogFlavors, getFlavorBasePrice, type PriceResponseBody, type ProductFlavor } from "@/lib/catalog";
 
 type Template = {
   id: string;
@@ -139,20 +139,6 @@ type EditCartPayload = {
   };
 };
 
-type PriceResponseBody = {
-  amount: number;
-  discountAmount: number;
-  originalAmount: number;
-  currency?: string;
-  productRatingResult?: Array<{
-    id?: string;
-    productId?: string;
-    amount?: number;
-    discountAmount?: number;
-    originalAmount?: number;
-  }>;
-};
-
 type CalculatorCartItemPayload = {
   buyUrl?: string;
   rewriteValue?: Record<string, unknown>;
@@ -185,8 +171,6 @@ type EditorTarget =
       id: string;
     };
 
-const FILTER_VCPU_OPTIONS = ["0", "1", "2", "4", "8", "16", "32", "64"];
-const FILTER_RAM_OPTIONS = ["0", "2", "4", "8", "16", "32", "64", "128", "256", "512"];
 const CONFIG_HOUR_OPTIONS = ["24", "168", "360", "720", "744"];
 const CONFIG_QUANTITY_OPTIONS = ["1", "2", "3", "5", "10"];
 
@@ -197,6 +181,47 @@ function withCurrentOption(options: string[], current: string): string[] {
   }
 
   return [trimmed, ...options];
+}
+
+function buildCachedEstimateResult(
+  body: PriceResponseBody,
+  region: string,
+  flavorCode: string,
+  diskType: string,
+  diskSize: number,
+  hours: number,
+  quantity: number,
+): ReplayResult {
+  return {
+    endpoint: {
+      id: "cached-price-estimate",
+      name: "Cached price estimate",
+    },
+    request: {
+      method: "POST",
+      url: `/api/catalog?region=${encodeURIComponent(region)}`,
+      headers: {},
+      bodyRaw: JSON.stringify({
+        region,
+        flavorCode,
+        diskType,
+        diskSize,
+        hours,
+        quantity,
+      }),
+      useCapturedAuth: false,
+    },
+    response: {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      contentType: "application/json",
+      durationMs: 0,
+      body,
+      rawTextPreview: JSON.stringify(body).slice(0, 1200),
+    },
+    testedAt: new Date().toISOString(),
+  };
 }
 
 function pretty(value: unknown): string {
@@ -711,8 +736,6 @@ export default function Home() {
   const totalFlavorPages = Math.max(1, Math.ceil(filteredFlavors.length / flavorsPerPage));
   const paginatedCarts = cartsSorted.slice((cartPage - 1) * cartsPerPage, cartPage * cartsPerPage);
   const paginatedFlavors = filteredFlavors.slice((flavorPage - 1) * flavorsPerPage, flavorPage * flavorsPerPage);
-  const catalogMinVcpuOptions = withCurrentOption(FILTER_VCPU_OPTIONS, catalogMinVcpu);
-  const catalogMinRamOptions = withCurrentOption(FILTER_RAM_OPTIONS, catalogMinRam);
   const configHourOptions = withCurrentOption(CONFIG_HOUR_OPTIONS, configHours);
   const configQuantityOptions = withCurrentOption(CONFIG_QUANTITY_OPTIONS, configQuantity);
 
@@ -759,6 +782,19 @@ export default function Home() {
     const data = (await response.json()) as ReplayResult & { error?: string };
     if (!response.ok) {
       throw new Error(data.error ?? `Replay failed with status ${response.status}`);
+    }
+
+    return data;
+  }
+
+  async function fetchCatalogFromCache(region: string): Promise<ReplayResult> {
+    const response = await fetch(`/api/catalog?region=${encodeURIComponent(region)}`, {
+      cache: "no-store",
+    });
+
+    const data = (await response.json()) as ReplayResult & { error?: string };
+    if (!response.ok) {
+      throw new Error(data.error ?? `Catalog cache lookup failed with status ${response.status}`);
     }
 
     return data;
@@ -865,24 +901,13 @@ export default function Home() {
   }, [calculatorItems, remoteCartItems]);
 
   async function loadCatalogForRegion(region: string, preferredFlavorCode?: string) {
-    const template = findTemplate(templates, "get-product-options-and-info");
-    if (!template) {
-      setAppError("Catalog template is missing");
-      return [] as ProductFlavor[];
-    }
-
     setCatalogLoading(true);
     setAppError("");
 
     try {
       const nextRegion = region.trim() || "ap-southeast-3";
       setCatalogRegion(nextRegion);
-
-      const url = new URL(template.url);
-      url.searchParams.set("region", nextRegion);
-      const result = await replayOne("get-product-options-and-info", {
-        url: url.toString(),
-      });
+      const result = await fetchCatalogFromCache(nextRegion);
       setCatalogResult(result);
 
       const nextFlavors = getCatalogFlavors(result.response.body);
@@ -983,12 +1008,6 @@ export default function Home() {
   }
 
   async function estimatePrice() {
-    const template = findTemplate(templates, "get-price");
-    if (!template || typeof template.bodyJson !== "object" || !template.bodyJson) {
-      setAppError("Price template is missing");
-      return;
-    }
-
     if (!selectedFlavor) {
       setAppError("Select a flavor before estimating price");
       return;
@@ -998,24 +1017,36 @@ export default function Home() {
     setAppError("");
 
     try {
-      const payload = cloneJson(template.bodyJson as PricePayload);
       const quantity = Number.parseInt(configQuantity, 10) || 1;
       const hours = Number.parseInt(configHours, 10) || 744;
       const diskSize = Number.parseInt(configDiskSize, 10) || 40;
-
-      payload.regionId = configRegion.trim() || payload.regionId;
-      payload.productInfos[0].resourceSpecCode = selectedFlavor.resourceSpecCode;
-      payload.productInfos[0].productNum = quantity;
-      payload.productInfos[0].usageValue = hours;
-      payload.productInfos[1].resourceSpecCode = configDiskType.trim() || payload.productInfos[1].resourceSpecCode;
-      payload.productInfos[1].resourceSize = diskSize;
-      payload.productInfos[1].productNum = quantity;
-      payload.productInfos[1].usageValue = hours;
-
-      const result = await replayOne("get-price", {
-        bodyRaw: JSON.stringify(payload),
+      const nextRegion = configRegion.trim() || catalogRegion.trim() || "ap-southeast-3";
+      const pricingCatalog = nextRegion === catalogRegion.trim() && catalogResult
+        ? catalogResult
+        : await fetchCatalogFromCache(nextRegion);
+      const estimate = buildCatalogPriceEstimate(pricingCatalog.response.body, {
+        flavorCode: selectedFlavor.resourceSpecCode,
+        diskType: configDiskType.trim() || "GPSSD",
+        diskSize,
+        hours,
+        quantity,
       });
+      if (!estimate) {
+        throw new Error(`Cached pricing data is unavailable for ${selectedFlavor.resourceSpecCode} in ${nextRegion}`);
+      }
 
+      setCatalogRegion(nextRegion);
+      setCatalogResult(pricingCatalog);
+
+      const result = buildCachedEstimateResult(
+        estimate,
+        nextRegion,
+        selectedFlavor.resourceSpecCode,
+        configDiskType.trim() || "GPSSD",
+        diskSize,
+        hours,
+        quantity,
+      );
       setEstimateResult(result);
     } catch (error) {
       setAppError(error instanceof Error ? error.message : "Failed to estimate price");
@@ -1564,25 +1595,13 @@ export default function Home() {
                       <label className="label" htmlFor="catalog-min-vcpu">
                         Min vCPU
                       </label>
-                      <select className="field" id="catalog-min-vcpu" onChange={(event) => setCatalogMinVcpu(event.target.value)} value={catalogMinVcpu}>
-                        {catalogMinVcpuOptions.map((option) => (
-                          <option key={option} value={option}>
-                            {option === "0" ? "Any" : option}
-                          </option>
-                        ))}
-                      </select>
+                      <input className="field" id="catalog-min-vcpu" onChange={(event) => setCatalogMinVcpu(event.target.value)} value={catalogMinVcpu} />
                     </div>
                     <div>
                       <label className="label" htmlFor="catalog-min-ram">
                         Min RAM (GB)
                       </label>
-                      <select className="field" id="catalog-min-ram" onChange={(event) => setCatalogMinRam(event.target.value)} value={catalogMinRam}>
-                        {catalogMinRamOptions.map((option) => (
-                          <option key={option} value={option}>
-                            {option === "0" ? "Any" : option}
-                          </option>
-                        ))}
-                      </select>
+                      <input className="field" id="catalog-min-ram" onChange={(event) => setCatalogMinRam(event.target.value)} value={catalogMinRam} />
                     </div>
                   </div>
 

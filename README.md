@@ -65,11 +65,11 @@ docker run --rm -p 3000:3000 huaweicalculatorapi:latest
 - Cart list sorted by most recent update first, with pagination in the sidebar.
 - Selected carts are resolved through the public `share/detail` endpoint and cached in the UI for faster switching.
 - Live cart items can be edited or deleted in place, and draft items can also be edited before publishing.
-- Browse and search ECS flavors collected from the product catalog API.
+- Browse and search ECS flavors collected from a server-side region cache that refreshes on startup and once per day.
 - Filter the flavor matrix by minimum vCPU and RAM, and sort it by base price.
 - Paginated flavor matrix so large catalogs stay responsive.
 - Configure region, quantity, hours, and system disk before pricing.
-- Estimate ECS monthly price from the pricing API.
+- Estimate ECS monthly price from cached catalog base rates instead of live per-click pricing requests.
 - Stage multiple products locally in a calculator cart.
 - Publish the full staged calculator into the selected Huawei cart with the captured update API.
 - Debug payloads stay hidden by default so the main calculator renders faster.
