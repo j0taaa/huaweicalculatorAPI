@@ -210,8 +210,7 @@ type EditorTarget =
 
 const CONFIG_HOUR_OPTIONS = ["24", "168", "360", "720", "744"];
 const CONFIG_QUANTITY_OPTIONS = ["1", "2", "3", "5", "10"];
-const DEFAULT_CONFIG_REGION = "sa-brazil-1";
-const DEFAULT_CATALOG_REGION = "ap-southeast-3";
+const DEFAULT_REGION = "sa-brazil-1";
 const DEFAULT_CATALOG_DISK_TYPE = "GPSSD";
 
 function withCurrentOption(options: string[], current: string): string[] {
@@ -226,7 +225,7 @@ function withCurrentOption(options: string[], current: string): string[] {
 function mergeCatalogRegions(regions: CatalogRegion[], ...extraRegionIds: string[]): CatalogRegion[] {
   const merged = new Map<string, CatalogRegion>();
 
-  for (const regionId of [DEFAULT_CONFIG_REGION, ...extraRegionIds]) {
+  for (const regionId of [DEFAULT_REGION, ...extraRegionIds]) {
     const trimmed = regionId.trim();
     if (trimmed && !merged.has(trimmed)) {
       merged.set(trimmed, { id: trimmed, name: trimmed });
@@ -675,9 +674,9 @@ export default function Home() {
   const [cartDetailResult, setCartDetailResult] = useState<CartDetailResult | null>(null);
   const [cartDetailCache, setCartDetailCache] = useState<Record<string, ShareCartDetail>>({});
 
-  const [catalogRegion, setCatalogRegion] = useState(DEFAULT_CATALOG_REGION);
+  const [catalogRegion, setCatalogRegion] = useState(DEFAULT_REGION);
   const [catalogRegions, setCatalogRegions] = useState<CatalogRegion[]>([
-    { id: DEFAULT_CONFIG_REGION, name: DEFAULT_CONFIG_REGION },
+    { id: DEFAULT_REGION, name: DEFAULT_REGION },
   ]);
   const [catalogSearch, setCatalogSearch] = useState("");
   const [catalogMinVcpu, setCatalogMinVcpu] = useState("0");
@@ -688,7 +687,6 @@ export default function Home() {
   const [selectedFlavorCode, setSelectedFlavorCode] = useState("");
   const [flavorPage, setFlavorPage] = useState(1);
 
-  const [configRegion, setConfigRegion] = useState(DEFAULT_CONFIG_REGION);
   const [configDiskType, setConfigDiskType] = useState(DEFAULT_CATALOG_DISK_TYPE);
   const [configDiskSize, setConfigDiskSize] = useState("40");
   const [configHours, setConfigHours] = useState("744");
@@ -720,7 +718,7 @@ export default function Home() {
 
         if (regionResponse.ok) {
           const regionData = (await regionResponse.json()) as CatalogRegionListResult;
-          setCatalogRegions((current) => mergeCatalogRegions(regionData.regions ?? current, DEFAULT_CATALOG_REGION, DEFAULT_CONFIG_REGION));
+          setCatalogRegions((current) => mergeCatalogRegions(regionData.regions ?? current, DEFAULT_REGION));
         }
 
         const priceTemplate = findTemplate(data.templates, "get-price");
@@ -745,8 +743,7 @@ export default function Home() {
           const url = new URL(catalogTemplate.url);
           const region = url.searchParams.get("region");
           if (region) {
-            setCatalogRegion(region);
-            setCatalogRegions((current) => mergeCatalogRegions(current, region, DEFAULT_CONFIG_REGION));
+            setCatalogRegions((current) => mergeCatalogRegions(current, region));
           }
         }
       } catch (error) {
@@ -818,7 +815,7 @@ export default function Home() {
   const totalFlavorPages = Math.max(1, Math.ceil(filteredFlavors.length / flavorsPerPage));
   const paginatedCarts = cartsSorted.slice((cartPage - 1) * cartsPerPage, cartPage * cartsPerPage);
   const paginatedFlavors = filteredFlavors.slice((flavorPage - 1) * flavorsPerPage, flavorPage * flavorsPerPage);
-  const configRegionOptions = useMemo(() => mergeCatalogRegions(catalogRegions, catalogRegion, configRegion), [catalogRegion, catalogRegions, configRegion]);
+  const catalogRegionOptions = useMemo(() => mergeCatalogRegions(catalogRegions, catalogRegion), [catalogRegion, catalogRegions]);
   const configDiskTypeOptions = useMemo(() => {
     return withCurrentOption(
       [...new Set(catalogDisks.map((disk) => disk.resourceSpecCode.trim()).filter(Boolean))],
@@ -994,11 +991,11 @@ export default function Home() {
     setAppError("");
 
     try {
-      const nextRegion = region.trim() || DEFAULT_CATALOG_REGION;
+      const nextRegion = region.trim() || DEFAULT_REGION;
       setCatalogRegion(nextRegion);
       const result = await fetchCatalogFromCache(nextRegion);
       setCatalogResult(result);
-      setCatalogRegions((current) => mergeCatalogRegions(result.regions ?? current, nextRegion, configRegion));
+      setCatalogRegions((current) => mergeCatalogRegions(result.regions ?? current, nextRegion));
 
       const nextFlavors = getCatalogFlavors(result.response.body);
       const preferred = preferredFlavorCode
@@ -1021,7 +1018,6 @@ export default function Home() {
 
   function populateEditorFromDraftItem(item: CalculatorItem) {
     setEditorTarget({ kind: "draft", id: item.id });
-    setConfigRegion(item.region);
     setConfigQuantity(String(item.quantity));
     setConfigHours(String(item.hours));
     setConfigDiskType(item.diskType);
@@ -1035,7 +1031,6 @@ export default function Home() {
 
   function populateEditorFromRemoteItem(item: RemoteCartItem) {
     setEditorTarget({ kind: "remote", id: item.id });
-    setConfigRegion(item.region);
     setConfigQuantity(String(item.quantity));
     setConfigHours(String(item.hours));
     setConfigDiskType(item.diskType);
@@ -1110,7 +1105,7 @@ export default function Home() {
       const quantity = Number.parseInt(configQuantity, 10) || 1;
       const hours = Number.parseInt(configHours, 10) || 744;
       const diskSize = Number.parseInt(configDiskSize, 10) || 40;
-      const nextRegion = configRegion.trim() || catalogRegion.trim() || DEFAULT_CATALOG_REGION;
+      const nextRegion = catalogRegion.trim() || DEFAULT_REGION;
       const pricingCatalog = nextRegion === catalogRegion.trim() && catalogResult
         ? catalogResult
         : await fetchCatalogFromCache(nextRegion);
@@ -1125,9 +1120,8 @@ export default function Home() {
         throw new Error(`Cached pricing data is unavailable for ${selectedFlavor.resourceSpecCode} in ${nextRegion}`);
       }
 
-      setCatalogRegion(nextRegion);
       setCatalogResult(pricingCatalog);
-      setCatalogRegions((current) => mergeCatalogRegions(pricingCatalog.regions ?? current, nextRegion, configRegion));
+      setCatalogRegions((current) => mergeCatalogRegions(pricingCatalog.regions ?? current, nextRegion));
 
       const result = buildCachedEstimateResult(
         estimate,
@@ -1165,7 +1159,7 @@ export default function Home() {
     const diskSize = Number.parseInt(configDiskSize, 10) || 40;
 
     const payload = buildCalculatorItemPayload(sampleItem, selectedFlavor, estimateBody, {
-      region: configRegion.trim() || DEFAULT_CONFIG_REGION,
+      region: catalogRegion.trim() || DEFAULT_REGION,
       quantity,
       hours,
       diskType: configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
@@ -1178,7 +1172,7 @@ export default function Home() {
       id: editingDraftItem?.id ?? `${Date.now()}-${selectedFlavor.resourceSpecCode}`,
       title: configTitle.trim() || selectedFlavor.resourceSpecCode,
       description: configDescription.trim() || "Generated from the custom calculator",
-      region: configRegion.trim() || DEFAULT_CONFIG_REGION,
+      region: catalogRegion.trim() || DEFAULT_REGION,
       quantity,
       hours,
       diskType: configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
@@ -1300,7 +1294,7 @@ export default function Home() {
     const diskSize = Number.parseInt(configDiskSize, 10) || 40;
 
     const nextPayload = buildCalculatorItemPayload(editingRemoteItem.payload, selectedFlavor, estimateBody, {
-      region: configRegion.trim() || editingRemoteItem.region,
+      region: catalogRegion.trim() || editingRemoteItem.region,
       quantity,
       hours,
       diskType: configDiskType.trim() || editingRemoteItem.diskType,
@@ -1659,7 +1653,13 @@ export default function Home() {
                     <label className="label" htmlFor="catalog-region">
                       Region
                     </label>
-                    <input className="field min-w-[180px]" id="catalog-region" onChange={(event) => setCatalogRegion(event.target.value)} value={catalogRegion} />
+                    <select className="field min-w-[220px]" id="catalog-region" onChange={(event) => setCatalogRegion(event.target.value)} value={catalogRegion}>
+                      {catalogRegionOptions.map((region) => (
+                        <option key={region.id} value={region.id}>
+                          {region.name === region.id ? region.id : `${region.name} (${region.id})`}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <button className="btn btn-primary" disabled={catalogLoading || loadingTemplates} onClick={() => void loadCatalog()} type="button">
                     {catalogLoading ? "Loading..." : "Load flavors"}
@@ -1725,7 +1725,7 @@ export default function Home() {
                     <span>Base hourly price</span>
                   </div>
 
-                  <div className="mt-2 space-y-2">
+                  <div className="flavor-matrix-body mt-2 space-y-2">
                     {paginatedFlavors.map((flavor) => (
                       <button
                         key={flavor.resourceSpecCode}
@@ -1802,18 +1802,6 @@ export default function Home() {
                 <div className="soft-panel">
                   <p className="section-title">Configuration</p>
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    <div>
-                      <label className="label" htmlFor="config-region">
-                        Workload region
-                      </label>
-                      <select className="field" id="config-region" onChange={(event) => setConfigRegion(event.target.value)} value={configRegion}>
-                        {configRegionOptions.map((region) => (
-                          <option key={region.id} value={region.id}>
-                            {region.name === region.id ? region.id : `${region.name} (${region.id})`}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
                     <div>
                       <label className="label" htmlFor="config-title">
                         Product title

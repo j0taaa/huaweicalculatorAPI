@@ -179,6 +179,12 @@ pre,
   color: #64748b;
 }
 
+.flavor-matrix-body {
+  max-height: min(28rem, 58vh);
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
 .flavor-row {
   display: grid;
   width: 100%;
@@ -205,6 +211,10 @@ pre,
 }
 
 @media (max-width: 900px) {
+  .flavor-matrix-body {
+    max-height: min(24rem, 52vh);
+  }
+
   .flavor-matrix-header {
     display: none;
   }
