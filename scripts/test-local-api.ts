@@ -1,4 +1,12 @@
 const BASE_URL = process.env.BASE_URL ?? "http://127.0.0.1:3000";
+const sessionCookie = process.env.HWC_COOKIE;
+const sessionCsrf = process.env.HWC_CSRF;
+
+const AUTH_REQUIRED_IDS = new Set([
+  "get-all-carts",
+  "create-cart",
+  "edit-cart",
+]);
 
 async function main() {
   const templatesResponse = await fetch(`${BASE_URL}/api/templates`, { cache: "no-store" });
@@ -15,10 +23,21 @@ async function main() {
   }
 
   for (const template of templatesData.templates) {
+    const requiresSession = AUTH_REQUIRED_IDS.has(template.id);
+    if (requiresSession && !sessionCookie) {
+      console.log(`SKIP ${template.name}: set HWC_COOKIE to test authenticated cart APIs`);
+      continue;
+    }
+
     const replayResponse = await fetch(`${BASE_URL}/api/replay`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: template.id, useCapturedAuth: true }),
+      body: JSON.stringify({
+        id: template.id,
+        useCapturedAuth: true,
+        cookie: sessionCookie,
+        csrf: sessionCsrf,
+      }),
     });
 
     if (!replayResponse.ok) {
@@ -39,7 +58,7 @@ async function main() {
     console.log(`PASS ${template.name}: ${replayData.response.status}`);
   }
 
-  console.log("All local API smoke tests passed");
+  console.log("Local API smoke test complete");
 }
 
 void main();

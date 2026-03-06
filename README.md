@@ -1,6 +1,6 @@
 # Huawei Calculator API Explorer
 
-This repository now contains a Bun + Next.js (TypeScript + Tailwind) UI that reads `postmanLog.json`, explains captured Huawei Cloud calculator endpoints, and replays them server-side for testing.
+This repository now contains a Bun + Next.js (TypeScript + Tailwind) UI that reads `postmanLog.json`, turns the captured Huawei Cloud calculator calls into task-focused screens, and replays them server-side.
 
 ## What is in `postmanLog.json`
 
@@ -28,10 +28,10 @@ Open `http://localhost:3000`.
 bun run lint
 bun run build
 
-# replay all captured requests directly (server-to-server)
+# replay public endpoints directly
 bun run test:replay
 
-# replay without captured auth headers (informational)
+# replay without auth headers (informational)
 bun run test:replay:noauth
 ```
 
@@ -39,6 +39,13 @@ To test the app routes while the app is running:
 
 ```bash
 bun run test:api
+```
+
+To test cart APIs with a fresh session:
+
+```bash
+HWC_COOKIE='your-cookie' HWC_CSRF='your-csrf' bun run test:replay
+HWC_COOKIE='your-cookie' HWC_CSRF='your-csrf' bun run test:api
 ```
 
 ## Docker
@@ -52,7 +59,8 @@ docker run --rm -p 3000:3000 huaweicalculatorapi:latest
 
 ## UI behavior
 
-- Loads endpoint templates from `/api/templates` (masked sensitive headers in UI).
-- Replays selected endpoint via `/api/replay`.
-- Supports overrides for URL, body, CSRF, and cookie.
-- Includes one-click smoke test for all 5 endpoints.
+- Shared cookie/CSRF session panel in the corner, applied to every action.
+- Create cart form with a single name field.
+- Cart list browser with selectable cart keys.
+- "Write sample config" action to push the captured ECS draft into a chosen cart.
+- Price estimator and product flavor browser with simple inputs instead of raw JSON.
