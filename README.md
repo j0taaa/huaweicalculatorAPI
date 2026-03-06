@@ -1,6 +1,6 @@
 # Huawei Calculator API Explorer
 
-This repository now contains a Bun + Next.js (TypeScript + Tailwind) UI that reads `postmanLog.json`, turns the captured Huawei Cloud calculator calls into task-focused screens, and replays them server-side.
+This repository now contains a Bun + Next.js (TypeScript + Tailwind) calculator UI that reads `postmanLog.json`, lets users build ECS configurations, estimate pricing, and publish the staged calculator into a Huawei cart.
 
 ## What is in `postmanLog.json`
 
@@ -44,8 +44,8 @@ bun run test:api
 To test cart APIs with a fresh session:
 
 ```bash
-HWC_COOKIE='your-cookie' HWC_CSRF='your-csrf' bun run test:replay
-HWC_COOKIE='your-cookie' HWC_CSRF='your-csrf' bun run test:api
+HWC_COOKIE='HWS_INTL_ID=your-token' bun run test:replay
+HWC_COOKIE='HWS_INTL_ID=your-token' bun run test:api
 ```
 
 ## Docker
@@ -61,7 +61,9 @@ docker run --rm -p 3000:3000 huaweicalculatorapi:latest
 
 - Shared session panel in the corner, applied to every action.
 - Accepts a full cookie string, `HWS_INTL_ID=...`, or only the `HWS_INTL_ID` value and auto-normalizes it.
-- Create cart form with a single name field.
-- Cart list browser with selectable cart keys.
-- "Write sample config" action to push the captured ECS draft into a chosen cart.
-- Price estimator and product flavor browser with simple inputs instead of raw JSON.
+- Create or select a target Huawei cart.
+- Browse and search ECS flavors collected from the product catalog API.
+- Configure region, quantity, hours, and system disk before pricing.
+- Estimate ECS monthly price from the pricing API.
+- Stage multiple products locally in a calculator cart.
+- Publish the full staged calculator into the selected Huawei cart with the captured update API.

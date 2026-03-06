@@ -13,8 +13,8 @@ const mono = Fira_Code({
 });
 
 export const metadata: Metadata = {
-  title: "Huawei Calculator API Explorer",
-  description: "Interactive tester for captured Huawei Cloud calculator endpoints",
+  title: "Huawei Cloud ECS Calculator",
+  description: "Build ECS configurations, estimate pricing, and publish them into Huawei carts",
 };
 
 export default function RootLayout({
