@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 
 type Template = {
   id: string;
@@ -37,6 +37,26 @@ type ReplayResult = {
   testedAt: string;
 };
 
+type CartDetailResult = {
+  request: {
+    method: string;
+    url: string;
+    headers: Record<string, string>;
+    bodyRaw: string | null;
+    useCapturedAuth: boolean;
+  };
+  response: {
+    ok: boolean;
+    status: number;
+    statusText: string;
+    contentType: string;
+    durationMs: number;
+    body: unknown;
+    rawTextPreview: string;
+  };
+  testedAt: string;
+};
+
 type CartSummary = {
   key: string;
   name: string;
@@ -46,6 +66,51 @@ type CartSummary = {
     amount?: number;
     originalAmount?: number;
   };
+};
+
+type ShareCartItemPayload = {
+  buyUrl?: string;
+  rewriteValue?: {
+    global_DESCRIPTION?: string;
+  };
+  selectedProduct?: {
+    _customTitle?: string;
+    description?: string;
+    region?: string;
+    amount?: number;
+    originalAmount?: number;
+    purchaseNum?: {
+      measureValue?: number;
+    };
+    purchaseTime?: {
+      measureValue?: number;
+    };
+    productAllInfos?: Array<Record<string, unknown>>;
+  };
+};
+
+type ShareCartDetail = {
+  billingMode?: string;
+  cartListData?: ShareCartItemPayload[];
+  name?: string;
+  totalPrice?: {
+    amount?: number;
+    originalAmount?: number;
+    discountAmount?: number;
+  };
+};
+
+type RemoteCartItem = {
+  id: string;
+  title: string;
+  description: string;
+  region: string;
+  quantity: number;
+  hours: number;
+  diskLabel: string;
+  flavorCode: string;
+  totalAmount: number;
+  originalAmount: number;
 };
 
 type ProductFlavor = {
@@ -213,6 +278,19 @@ function getCartList(body: unknown): CartSummary[] {
   return lists as CartSummary[];
 }
 
+function getShareCartDetail(body: unknown): ShareCartDetail | null {
+  if (!body || typeof body !== "object") {
+    return null;
+  }
+
+  const data = (body as { data?: unknown }).data;
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+
+  return data as ShareCartDetail;
+}
+
 function extractMinimalCookie(input: string): string {
   const trimmed = input.trim();
   if (!trimmed) {
@@ -288,6 +366,43 @@ function getFlavorSpec(flavor: ProductFlavor): string {
 
 function getSelectedFlavor(flavors: ProductFlavor[], code: string): ProductFlavor | null {
   return flavors.find((flavor) => flavor.resourceSpecCode === code) ?? null;
+}
+
+function getRemoteCartItems(detail: ShareCartDetail | null): RemoteCartItem[] {
+  if (!detail?.cartListData?.length) {
+    return [];
+  }
+
+  return detail.cartListData.map((item, index) => {
+    const selectedProduct = item.selectedProduct ?? {};
+    const productInfos = Array.isArray(selectedProduct.productAllInfos) ? selectedProduct.productAllInfos : [];
+    const vmInfo = (productInfos[0] ?? {}) as Record<string, unknown>;
+    const diskInfo = (productInfos[2] ?? {}) as Record<string, unknown>;
+    const flavorCode = typeof vmInfo.resourceSpecCode === "string" ? vmInfo.resourceSpecCode : "Unknown flavor";
+    const diskType = typeof diskInfo.resourceSpecCode === "string" ? diskInfo.resourceSpecCode : "Disk";
+    const diskSize = typeof diskInfo.resourceSize === "number" ? diskInfo.resourceSize : 0;
+    const title = selectedProduct._customTitle?.trim() || selectedProduct.description?.trim() || flavorCode || `Item ${index + 1}`;
+    const descriptionParts = [
+      typeof vmInfo.performType === "string" ? vmInfo.performType : null,
+      typeof vmInfo.instanceArch === "string" ? vmInfo.instanceArch : null,
+      typeof item.rewriteValue?.global_DESCRIPTION === "string" && item.rewriteValue.global_DESCRIPTION.trim()
+        ? item.rewriteValue.global_DESCRIPTION.trim()
+        : null,
+    ].filter(Boolean);
+
+    return {
+      id: `${flavorCode}-${index}`,
+      title,
+      description: descriptionParts.join(" / ") || "Elastic Cloud Server",
+      region: selectedProduct.region?.trim() || "Unknown region",
+      quantity: selectedProduct.purchaseNum?.measureValue ?? (typeof vmInfo.productNum === "number" ? vmInfo.productNum : 1),
+      hours: selectedProduct.purchaseTime?.measureValue ?? (typeof vmInfo.usageValue === "number" ? vmInfo.usageValue : 744),
+      diskLabel: diskSize > 0 ? `${diskType} ${diskSize}GB` : diskType,
+      flavorCode,
+      totalAmount: selectedProduct.amount ?? 0,
+      originalAmount: selectedProduct.originalAmount ?? selectedProduct.amount ?? 0,
+    };
+  });
 }
 
 function buildBuyUrl(
@@ -485,6 +600,10 @@ export default function Home() {
   const [cartLoading, setCartLoading] = useState(false);
   const [createCartLoading, setCreateCartLoading] = useState(false);
   const [cartPage, setCartPage] = useState(1);
+  const [cartDetailLoading, setCartDetailLoading] = useState(false);
+  const [cartDetailError, setCartDetailError] = useState("");
+  const [cartDetailResult, setCartDetailResult] = useState<CartDetailResult | null>(null);
+  const [cartDetailCache, setCartDetailCache] = useState<Record<string, ShareCartDetail>>({});
 
   const [catalogRegion, setCatalogRegion] = useState("ap-southeast-3");
   const [catalogSearch, setCatalogSearch] = useState("");
@@ -580,6 +699,7 @@ export default function Home() {
   const normalizedCookie = extractMinimalCookie(cookie);
   const flavors = getCatalogFlavors(catalogResult?.response.body);
   const deferredCatalogSearch = useDeferredValue(catalogSearch);
+  const deferredSelectedCartKey = useDeferredValue(selectedCartKey);
   const cartsSorted = useMemo(() => {
     return [...carts].sort((left, right) => (right.updateTime ?? 0) - (left.updateTime ?? 0));
   }, [carts]);
@@ -604,6 +724,9 @@ export default function Home() {
   const selectedFlavor = getSelectedFlavor(flavors, selectedFlavorCode);
   const estimateBody = estimateResult?.response.body as PriceResponseBody | undefined;
   const stagedTotal = calculatorItems.reduce((sum, item) => sum + item.totalAmount, 0);
+  const currentCartDetail = selectedCartKey ? cartDetailCache[selectedCartKey] ?? null : null;
+  const remoteCartItems = useMemo(() => getRemoteCartItems(currentCartDetail), [currentCartDetail]);
+  const remoteCartTotal = currentCartDetail?.totalPrice?.amount ?? remoteCartItems.reduce((sum, item) => sum + item.totalAmount, 0);
   const cartsPerPage = 6;
   const flavorsPerPage = 12;
   const totalCartPages = Math.max(1, Math.ceil(cartsSorted.length / cartsPerPage));
@@ -659,6 +782,60 @@ export default function Home() {
     return data;
   }
 
+  const loadCartDetail = useCallback(async (key: string, force = false) => {
+    const trimmedKey = key.trim();
+    if (!trimmedKey) {
+      return null;
+    }
+
+    if (!force && cartDetailCache[trimmedKey]) {
+      return cartDetailCache[trimmedKey];
+    }
+
+    setCartDetailLoading(true);
+    setCartDetailError("");
+
+    try {
+      const response = await fetch("/api/cart-detail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          key: trimmedKey,
+          cookie: normalizedCookie || undefined,
+          csrf: csrf.trim() || undefined,
+        }),
+      });
+
+      const data = (await response.json()) as CartDetailResult & { error?: string };
+      if (!response.ok) {
+        throw new Error(data.error ?? `Cart detail lookup failed with status ${response.status}`);
+      }
+
+      const nextDetail = getShareCartDetail(data.response.body);
+      if (!nextDetail) {
+        throw new Error("Huawei cart detail did not return a usable payload");
+      }
+
+      setCartDetailResult(data);
+      setCartDetailCache((current) => ({
+        ...current,
+        [trimmedKey]: nextDetail,
+      }));
+
+      if (!selectedCartName.trim() && nextDetail.name) {
+        setSelectedCartName(nextDetail.name);
+      }
+
+      return nextDetail;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load selected cart";
+      setCartDetailError(message);
+      throw error;
+    } finally {
+      setCartDetailLoading(false);
+    }
+  }, [cartDetailCache, csrf, normalizedCookie, selectedCartName]);
+
   async function refreshCarts() {
     setCartLoading(true);
     setAppError("");
@@ -678,6 +855,14 @@ export default function Home() {
       setCartLoading(false);
     }
   }
+
+  useEffect(() => {
+    if (deferredSelectedCartKey.trim().length < 12) {
+      return;
+    }
+
+    void loadCartDetail(deferredSelectedCartKey, false);
+  }, [deferredSelectedCartKey, loadCartDetail]);
 
   async function createCart() {
     const template = findTemplate(templates, "create-cart");
@@ -701,6 +886,18 @@ export default function Home() {
       if (typeof key === "string") {
         setSelectedCartKey(key);
         setSelectedCartName(payload.name as string);
+        setCartDetailCache((current) => ({
+          ...current,
+          [key]: {
+            name: payload.name as string,
+            cartListData: [],
+            totalPrice: {
+              amount: 0,
+              originalAmount: 0,
+              discountAmount: 0,
+            },
+          },
+        }));
       }
     } catch (error) {
       setAppError(error instanceof Error ? error.message : "Failed to create cart");
@@ -875,6 +1072,7 @@ export default function Home() {
 
       setPublishResult(result);
       await refreshCarts();
+      await loadCartDetail(selectedCartKey.trim(), true);
     } catch (error) {
       setAppError(error instanceof Error ? error.message : "Failed to publish calculator");
     } finally {
@@ -959,8 +1157,8 @@ export default function Home() {
                 <p className="metric-value text-lg">{selectedCartName || "Unset"}</p>
               </div>
               <div className="metric-card">
-                <p className="metric-label">Current total</p>
-                <p className="metric-value">{stagedTotal.toFixed(2)}</p>
+                <p className="metric-label">Live cart total</p>
+                <p className="metric-value">{remoteCartTotal.toFixed(2)}</p>
               </div>
             </div>
           </div>
@@ -1062,7 +1260,64 @@ export default function Home() {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="eyebrow">Current Cart</p>
-                  <h2 className="mt-1 text-2xl font-semibold">Draft contents</h2>
+                  <h2 className="mt-1 text-2xl font-semibold">Live contents</h2>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="pill">{remoteCartItems.length} items</span>
+                  <button className="btn btn-secondary btn-small" disabled={!selectedCartKey || cartDetailLoading} onClick={() => void loadCartDetail(selectedCartKey, true)} type="button">
+                    {cartDetailLoading ? "Loading..." : "Refresh"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-2">
+                <div className="metric-card">
+                  <p className="metric-label">Live total</p>
+                  <p className="metric-value">{remoteCartTotal.toFixed(2)}</p>
+                </div>
+                <div className="metric-card">
+                  <p className="metric-label">Cart key</p>
+                  <p className="metric-value text-base break-all">{selectedCartKey || "Unset"}</p>
+                </div>
+              </div>
+
+              {cartDetailError ? (
+                <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{cartDetailError}</p>
+              ) : null}
+
+              <div className="mt-4 space-y-3">
+                {remoteCartItems.length ? (
+                  remoteCartItems.map((item) => (
+                    <div key={item.id} className="result-strip">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-slate-900">{item.title}</p>
+                          <p className="mt-1 text-sm text-slate-600">{item.flavorCode}</p>
+                        </div>
+                        <span className="pill">{item.totalAmount.toFixed(2)}</span>
+                      </div>
+                      <p className="mt-2 text-sm text-slate-600">{item.description}</p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <span className="pill">{item.region}</span>
+                        <span className="pill">{item.quantity}x</span>
+                        <span className="pill">{item.hours}h</span>
+                        <span className="pill">{item.diskLabel}</span>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-slate-500">
+                    {selectedCartKey ? "This share cart is empty or not loaded yet." : "Select a cart to load its live contents."}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="sidebar-card">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="eyebrow">Pending Publish</p>
+                  <h2 className="mt-1 text-2xl font-semibold">Draft queue</h2>
                 </div>
                 <span className="pill">{calculatorItems.length} items</span>
               </div>
@@ -1384,6 +1639,10 @@ export default function Home() {
               <details className="debug-panel">
                 <summary>Publish response</summary>
                 <pre className="code-block mt-3">{publishResult ? pretty(publishResult.response.body) : "Publish the calculator first."}</pre>
+              </details>
+              <details className="debug-panel">
+                <summary>Selected cart detail</summary>
+                <pre className="code-block mt-3">{cartDetailResult ? pretty(cartDetailResult.response.body) : "Select a cart to load its live contents."}</pre>
               </details>
               <details className="debug-panel">
                 <summary>Current calculator payload</summary>

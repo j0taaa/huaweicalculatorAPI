@@ -61,8 +61,9 @@ docker run --rm -p 3000:3000 huaweicalculatorapi:latest
 
 - Shared session panel in the corner, applied to every action.
 - Accepts a full cookie string, `HWS_INTL_ID=...`, or only the `HWS_INTL_ID` value and auto-normalizes it.
-- Left sidebar for cart creation, cart selection, and current draft contents.
+- Left sidebar for cart creation, cart selection, live share-cart contents, and the pending publish queue.
 - Cart list sorted by most recent update first, with pagination in the sidebar.
+- Selected carts are resolved through the public `share/detail` endpoint and cached in the UI for faster switching.
 - Browse and search ECS flavors collected from the product catalog API.
 - Filter the flavor matrix by minimum vCPU and RAM, and sort it by base price.
 - Paginated flavor matrix so large catalogs stay responsive.

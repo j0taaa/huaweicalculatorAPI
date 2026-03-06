@@ -57,6 +57,13 @@ export type ReplayInput = {
   useCapturedAuth?: boolean;
 };
 
+export type ShareCartDetailInput = {
+  key: string;
+  language?: string;
+  csrf?: string;
+  cookie?: string;
+};
+
 const COLLECTION_PATH = join(process.cwd(), "postmanLog.json");
 
 function slugify(input: string): string {
@@ -99,6 +106,31 @@ function parseBody(raw: string | null): unknown {
   } catch {
     return raw;
   }
+}
+
+async function readResponse(response: Response, startedAt: number) {
+  const durationMs = Date.now() - startedAt;
+  const contentType = response.headers.get("content-type") ?? "";
+  const text = await response.text();
+
+  let parsed: unknown = text;
+  if (contentType.includes("application/json") || text.trim().startsWith("{") || text.trim().startsWith("[")) {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = text;
+    }
+  }
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    statusText: response.statusText,
+    contentType,
+    durationMs,
+    body: parsed,
+    rawTextPreview: text.slice(0, 1200),
+  };
 }
 
 export function loadTemplates(): EndpointTemplate[] {
@@ -183,19 +215,6 @@ export async function replayRequest(input: ReplayInput) {
 
   const startedAt = Date.now();
   const response = await fetch(url, init);
-  const durationMs = Date.now() - startedAt;
-
-  const contentType = response.headers.get("content-type") ?? "";
-  const text = await response.text();
-
-  let parsed: unknown = text;
-  if (contentType.includes("application/json") || text.trim().startsWith("{") || text.trim().startsWith("[")) {
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      parsed = text;
-    }
-  }
 
   return {
     template,
@@ -206,14 +225,42 @@ export async function replayRequest(input: ReplayInput) {
       bodyRaw,
       useCapturedAuth: input.useCapturedAuth !== false,
     },
-    response: {
-      ok: response.ok,
-      status: response.status,
-      statusText: response.statusText,
-      contentType,
-      durationMs,
-      body: parsed,
-      rawTextPreview: text.slice(0, 1200),
+    response: await readResponse(response, startedAt),
+  };
+}
+
+export async function fetchShareCartDetail(input: ShareCartDetailInput) {
+  const url = new URL("https://portal-intl.huaweicloud.com/api/calculator/rest/cbc/portalcalculatornodeservice/v4/api/share/detail");
+  url.searchParams.set("key", input.key);
+  url.searchParams.set("language", input.language?.trim() || "en-us");
+
+  const headers: Record<string, string> = {
+    accept: "application/json, text/plain, */*",
+  };
+
+  if (input.csrf) {
+    headers.csrf = input.csrf;
+  }
+
+  if (input.cookie) {
+    headers.Cookie = input.cookie;
+  }
+
+  const startedAt = Date.now();
+  const response = await fetch(url, {
+    method: "GET",
+    headers,
+    signal: AbortSignal.timeout(30_000),
+  });
+
+  return {
+    request: {
+      method: "GET",
+      url: url.toString(),
+      headers,
+      bodyRaw: null,
+      useCapturedAuth: Boolean(input.cookie || input.csrf),
     },
+    response: await readResponse(response, startedAt),
   };
 }
