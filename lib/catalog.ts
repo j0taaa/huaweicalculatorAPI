@@ -1,3 +1,5 @@
+import { getFlavorGeneration, type EcsCalculatorVisibilityConfig } from "@/lib/catalog-config";
+
 export type ProductFlavor = {
   resourceSpecCode: string;
   cloudServiceType?: string;
@@ -529,7 +531,35 @@ export function buildCatalogPriceEstimate(
   };
 }
 
-export function getCatalogFlavors(body: unknown): ProductFlavor[] {
+export function isCatalogFlavorVisible(
+  flavor: ProductFlavor,
+  visibilityConfig?: EcsCalculatorVisibilityConfig | null,
+): boolean {
+  const flavorType = typeof flavor.type === "string" ? flavor.type.trim().toLowerCase() : "";
+  if (flavorType === "hidden") {
+    return false;
+  }
+
+  const sysDesc = `${flavor.productSpecSysDesc ?? ""} ${flavor.productSpecDesc ?? ""}`.toLowerCase();
+  if (sysDesc.includes("remark:hidden")) {
+    return false;
+  }
+
+  const allowedGenerations = visibilityConfig?.allowedGenerations ?? [];
+  if (allowedGenerations.length) {
+    const generation = getFlavorGeneration(flavor);
+    if (generation && !allowedGenerations.includes(generation)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+export function getCatalogFlavors(
+  body: unknown,
+  visibilityConfig?: EcsCalculatorVisibilityConfig | null,
+): ProductFlavor[] {
   if (!body || typeof body !== "object") {
     return [];
   }
@@ -544,5 +574,5 @@ export function getCatalogFlavors(body: unknown): ProductFlavor[] {
     return [];
   }
 
-  return dedupeCatalogFlavors(vmList as ProductFlavor[]);
+  return dedupeCatalogFlavors(vmList as ProductFlavor[]).filter((flavor) => isCatalogFlavorVisible(flavor, visibilityConfig));
 }

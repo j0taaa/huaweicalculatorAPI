@@ -118,6 +118,36 @@ describe("catalog helpers", () => {
     expect(getFlavorBasePrice(flavors[0]!, "RI")).toBe(30);
   });
 
+  test("getCatalogFlavors filters hidden entries and generations not enabled in Huawei calculator config", () => {
+    const flavors = getCatalogFlavors({
+      product: {
+        ec2_vm: [
+          makeFlavor("x0.8u.64g", {
+            generation: "X0",
+            type: "hidden",
+            productSpecSysDesc: "Remark:hidden",
+          }),
+          makeFlavor("t7.medium.2", {
+            generation: "T7",
+            type: "normal",
+            productSpecSysDesc: "Remark:normal",
+            planList: [{ billingMode: "ONDEMAND", amount: 0.12 }],
+          }),
+          makeFlavor("t6.medium.2", {
+            generation: "T6",
+            type: "normal",
+            productSpecSysDesc: "Remark:normal",
+            planList: [{ billingMode: "ONDEMAND", amount: 0.11 }],
+          }),
+        ],
+      },
+    }, {
+      allowedGenerations: ["T6", "C7"],
+    });
+
+    expect(flavors.map((flavor) => flavor.resourceSpecCode)).toEqual(["t6.medium.2"]);
+  });
+
   test("getDiskBasePrice prefers ONDEMAND disk plans", () => {
     expect(getDiskBasePrice(makeDisk("GPSSD", {
       amount: 1,

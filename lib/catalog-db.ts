@@ -9,6 +9,7 @@ import {
   type ProductDisk,
   type ProductFlavor,
 } from "@/lib/catalog";
+import type { EcsCalculatorVisibilityConfig } from "@/lib/catalog-config";
 
 export type CachedReplayResult = {
   endpoint: {
@@ -81,6 +82,7 @@ type CatalogPriceRow = {
 
 const DEFAULT_DB_PATH = join(process.cwd(), "data", "catalog.db");
 const PRICING_MODES: CatalogPricingMode[] = ["ONDEMAND", "MONTHLY", "YEARLY", "RI"];
+const ECS_VISIBILITY_CONFIG_META_KEY = "ecsVisibilityConfig";
 
 declare global {
   var __hwcCatalogDb: SqliteDatabase | undefined;
@@ -203,6 +205,23 @@ export async function setCatalogMeta(key: string, value: string | null) {
     VALUES (?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value
   `).run(key, value);
+}
+
+export async function writeEcsVisibilityConfig(config: EcsCalculatorVisibilityConfig) {
+  await setCatalogMeta(ECS_VISIBILITY_CONFIG_META_KEY, JSON.stringify(config));
+}
+
+export async function readEcsVisibilityConfig(): Promise<EcsCalculatorVisibilityConfig | null> {
+  const raw = await getMeta(ECS_VISIBILITY_CONFIG_META_KEY);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as EcsCalculatorVisibilityConfig;
+  } catch {
+    return null;
+  }
 }
 
 function toCatalogRegions(rows: RegionRow[]): CatalogRegion[] {
@@ -348,7 +367,8 @@ function getCatalogPlanPrices<T extends ProductFlavor | ProductDisk>(
 export async function writeCatalogRegionSnapshot(region: CatalogRegion, entry: CachedReplayResult) {
   const db = await getCatalogDatabase();
   const now = new Date().toISOString();
-  const flavors = getCatalogFlavors(entry.response.body);
+  const visibilityConfig = await readEcsVisibilityConfig();
+  const flavors = getCatalogFlavors(entry.response.body, visibilityConfig ?? undefined);
   const disks = getCatalogDisks(entry.response.body);
   const flavorPlanPrices = getCatalogPlanPrices(flavors, getFlavorBasePrice);
   const diskPlanPrices = getCatalogPlanPrices(disks, getDiskBasePrice);
@@ -527,8 +547,14 @@ export async function readCatalogRegionSnapshot(regionId: string): Promise<Cache
     FROM catalog_disk_prices
     WHERE region_id = ?
   `).all(regionId);
+  const hydratedEntry = hydrateCatalogEntryPrices(entry, flavorPriceRows, diskPriceRows);
+  const visibilityConfig = await readEcsVisibilityConfig();
+  const body = hydratedEntry.response.body as { product?: { ec2_vm?: ProductFlavor[] } } | null;
+  if (body?.product) {
+    body.product.ec2_vm = getCatalogFlavors(body, visibilityConfig);
+  }
 
-  return hydrateCatalogEntryPrices(entry, flavorPriceRows, diskPriceRows);
+  return hydratedEntry;
 }
 
 export async function hasAnyCatalogSnapshots(): Promise<boolean> {

@@ -10,16 +10,19 @@ import {
   hasAnyCatalogSnapshots,
   listCatalogRegionErrors,
   listCatalogRegions,
+  readEcsVisibilityConfig,
   readCatalogRegionSnapshot,
   setCatalogMeta,
   setCatalogRegionError,
   writeCatalogRegionSnapshot,
   writeCatalogRegions,
+  writeEcsVisibilityConfig,
   writeOnDemandDiskPrice,
   writeOnDemandFlavorPrice,
   type CachedReplayResult,
   type CatalogRegion,
 } from "@/lib/catalog-db";
+import { fetchEcsVisibilityConfig, type EcsCalculatorVisibilityConfig } from "@/lib/catalog-config";
 import { getTemplateById, replayRequest } from "@/lib/postman";
 
 const REGION_DISCOVERY_URL = "https://sa-brazil-1-console.huaweicloud.com/apiexplorer/new/v6/regions?product_short=ECS&api_name=ListFlavors";
@@ -151,8 +154,12 @@ function buildOnDemandPriceBody(regionId: string, flavor: ProductFlavor, disk: P
   return JSON.stringify(body);
 }
 
-async function syncOnDemandFlavorPrices(regionId: string, entry: CachedReplayResult) {
-  const flavors = getCatalogFlavors(entry.response.body);
+async function syncOnDemandFlavorPrices(
+  regionId: string,
+  entry: CachedReplayResult,
+  visibilityConfig?: EcsCalculatorVisibilityConfig,
+) {
+  const flavors = getCatalogFlavors(entry.response.body, visibilityConfig);
   const disks = getCatalogDisks(entry.response.body);
   const disk = disks.find((item) => item.resourceSpecCode === "GPSSD") ?? disks[0];
   const failures: string[] = [];
@@ -212,6 +219,15 @@ async function refreshCatalogDatabase() {
   const startedAt = new Date().toISOString();
   await setCatalogMeta("lastRefreshStartedAt", startedAt);
 
+  let visibilityConfig = await readEcsVisibilityConfig() ?? undefined;
+  try {
+    visibilityConfig = await fetchEcsVisibilityConfig();
+    await writeEcsVisibilityConfig(visibilityConfig);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    console.warn(`ECS visibility config refresh failed; using cached visibility rules if available: ${message}`);
+  }
+
   const regions = await fetchCatalogRegions();
   await writeCatalogRegions(regions);
 
@@ -234,7 +250,7 @@ async function refreshCatalogDatabase() {
     }
 
     try {
-      await syncOnDemandFlavorPrices(region.id, entry);
+      await syncOnDemandFlavorPrices(region.id, entry, visibilityConfig);
     } catch (error) {
       await setCatalogRegionError(region.id, error instanceof Error ? error.message : `Price sync failed for ${region.id}`);
     }
