@@ -189,20 +189,22 @@ function getCatalogItemBasePrice(item: CatalogPricedItem, pricingMode: CatalogPr
 
   if (pricingMode === "RI") {
     const preferredRiPrice = getLowestPlanAmount(matchingPlans.filter((plan) => (
-      plan.originType === "perEffectivePrice" || plan.amountType === "nodeData.perEffectivePrice"
+      plan.originType === "perPrice" || plan.amountType === "nodeData.perPrice"
     )));
     if (Number.isFinite(preferredRiPrice)) {
       return preferredRiPrice;
     }
 
     const fallbackRiPrice = getLowestPlanAmount(matchingPlans.filter((plan) => (
-      plan.originType === "perPrice" || plan.amountType === "nodeData.perPrice"
+      plan.originType !== "perEffectivePrice" && plan.amountType !== "nodeData.perEffectivePrice"
     )));
     if (Number.isFinite(fallbackRiPrice)) {
       return fallbackRiPrice;
     }
 
-    const genericRiPrice = getLowestPlanAmount(matchingPlans);
+    const genericRiPrice = getLowestPlanAmount(matchingPlans.filter((plan) => (
+      plan.originType === "perEffectivePrice" || plan.amountType === "nodeData.perEffectivePrice"
+    )));
     if (Number.isFinite(genericRiPrice)) {
       return genericRiPrice;
     }
@@ -375,9 +377,9 @@ export function buildCatalogPriceEstimate(
   const quantity = Math.max(1, config.quantity);
   const durationValue = Math.max(1, config.durationValue);
   const diskSize = Math.max(0, config.diskSize);
-
-  const flavorAmount = roundMoney(flavorRate * quantity * durationValue);
-  const diskAmount = roundMoney(diskRate * diskSize * quantity * durationValue);
+  const isReservedInstance = config.pricingMode === "RI";
+  const flavorAmount = roundMoney(flavorRate * quantity * (isReservedInstance ? 1 : durationValue));
+  const diskAmount = roundMoney(isReservedInstance ? 0 : diskRate * diskSize * quantity * durationValue);
   const totalAmount = roundMoney(flavorAmount + diskAmount);
 
   return {

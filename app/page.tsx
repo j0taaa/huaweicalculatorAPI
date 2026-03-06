@@ -262,7 +262,7 @@ function getPricingRateLabel(pricingMode: CatalogPricingMode): string {
     case "YEARLY":
       return "Base yearly price";
     case "RI":
-      return "RI effective hourly price";
+      return "RI price";
     default:
       return "Base hourly price";
   }
@@ -274,6 +274,8 @@ function getPricingDurationLabel(pricingMode: CatalogPricingMode): string {
       return "Months";
     case "YEARLY":
       return "Years";
+    case "RI":
+      return "Reservations";
     default:
       return "Hours";
   }
@@ -285,6 +287,8 @@ function getPricingDurationUnit(pricingMode: CatalogPricingMode): string {
       return "month";
     case "YEARLY":
       return "year";
+    case "RI":
+      return "reservation";
     default:
       return "hour";
   }
@@ -296,6 +300,8 @@ function getPricingDurationOptions(pricingMode: CatalogPricingMode): string[] {
       return CONFIG_MONTH_OPTIONS;
     case "YEARLY":
       return CONFIG_YEAR_OPTIONS;
+    case "RI":
+      return ["1"];
     default:
       return CONFIG_HOUR_OPTIONS;
   }
@@ -309,6 +315,11 @@ function formatDuration(pricingMode: CatalogPricingMode, value: number): string 
   const unit = getPricingDurationUnit(pricingMode);
   const suffix = value === 1 ? unit : `${unit}s`;
   return `${value} ${suffix}`;
+}
+
+function getNormalizedDurationValue(pricingMode: CatalogPricingMode, value: string): number {
+  const parsed = Number.parseInt(value, 10) || Number.parseInt(getDefaultDurationValue(pricingMode), 10) || 1;
+  return pricingMode === "RI" ? 1 : parsed;
 }
 
 function getStoredPricingMode(item: ShareCartItemPayload): CatalogPricingMode {
@@ -1263,7 +1274,7 @@ export default function Home() {
 
     try {
       const quantity = Number.parseInt(configQuantity, 10) || 1;
-      const durationValue = Number.parseInt(configHours, 10) || Number.parseInt(getDefaultDurationValue(catalogPricingMode), 10) || 1;
+      const durationValue = getNormalizedDurationValue(catalogPricingMode, configHours);
       const diskSize = Number.parseInt(configDiskSize, 10) || 40;
       const nextRegion = catalogRegion.trim() || DEFAULT_REGION;
       const pricingCatalog = nextRegion === catalogRegion.trim() && catalogResult
@@ -1317,7 +1328,7 @@ export default function Home() {
     const sampleBody = editTemplate.bodyJson as EditCartPayload;
     const sampleItem = sampleBody.cartListData[0];
     const quantity = Number.parseInt(configQuantity, 10) || 1;
-    const durationValue = Number.parseInt(configHours, 10) || Number.parseInt(getDefaultDurationValue(catalogPricingMode), 10) || 1;
+    const durationValue = getNormalizedDurationValue(catalogPricingMode, configHours);
     const diskSize = Number.parseInt(configDiskSize, 10) || 40;
 
     const payload = buildCalculatorItemPayload(sampleItem, selectedFlavor, estimateBody, {
@@ -1456,7 +1467,7 @@ export default function Home() {
     }
 
     const quantity = Number.parseInt(configQuantity, 10) || 1;
-    const durationValue = Number.parseInt(configHours, 10) || Number.parseInt(getDefaultDurationValue(catalogPricingMode), 10) || 1;
+    const durationValue = getNormalizedDurationValue(catalogPricingMode, configHours);
     const diskSize = Number.parseInt(configDiskSize, 10) || 40;
 
     const nextPayload = buildCalculatorItemPayload(editingRemoteItem.payload, selectedFlavor, estimateBody, {
@@ -1725,7 +1736,7 @@ export default function Home() {
                         <span className="pill">{item.region}</span>
                         <span className="pill">{getPricingModeLabel(item.pricingMode)}</span>
                         <span className="pill">{item.quantity}x</span>
-                        <span className="pill">{formatDuration(item.pricingMode, item.hours)}</span>
+                        {item.pricingMode === "RI" ? null : <span className="pill">{formatDuration(item.pricingMode, item.hours)}</span>}
                         <span className="pill">{item.diskLabel}</span>
                       </div>
                     </div>
@@ -1779,7 +1790,7 @@ export default function Home() {
                       <div className="mt-3 flex flex-wrap gap-2">
                         <span className="pill">{getPricingModeLabel(item.pricingMode)}</span>
                         <span className="pill">{item.quantity}x</span>
-                        <span className="pill">{formatDuration(item.pricingMode, item.hours)}</span>
+                        {item.pricingMode === "RI" ? null : <span className="pill">{formatDuration(item.pricingMode, item.hours)}</span>}
                         <span className="pill">{item.diskType} {item.diskSize}GB</span>
                         <span className="pill">{item.totalAmount.toFixed(2)} {item.currency}</span>
                       </div>
@@ -1989,18 +2000,27 @@ export default function Home() {
                       </label>
                       <input className="field" id="config-title" onChange={(event) => setConfigTitle(event.target.value)} value={configTitle} />
                     </div>
-                    <div>
-                      <label className="label" htmlFor="config-hours">
-                        {getPricingDurationLabel(catalogPricingMode)}
-                      </label>
-                      <select className="field" id="config-hours" onChange={(event) => setConfigHours(event.target.value)} value={configHours}>
-                        {configHourOptions.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                    {catalogPricingMode === "RI" ? (
+                      <div>
+                        <label className="label">RI pricing</label>
+                        <div className="field flex min-h-11 items-center bg-slate-50 text-sm text-slate-600">
+                          One-time RI purchase price per instance
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="label" htmlFor="config-hours">
+                          {getPricingDurationLabel(catalogPricingMode)}
+                        </label>
+                        <select className="field" id="config-hours" onChange={(event) => setConfigHours(event.target.value)} value={configHours}>
+                          {configHourOptions.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                     <div>
                       <label className="label" htmlFor="config-quantity">
                         Quantity
@@ -2053,7 +2073,9 @@ export default function Home() {
                       </p>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <span className="pill">{getPricingModeLabel(catalogPricingMode)}</span>
-                        <span className="pill">Disk: {getPricingModeLabel(getEffectiveDiskPricingMode(catalogPricingMode))}</span>
+                        {catalogPricingMode === "RI"
+                          ? <span className="pill">Disk pricing excluded</span>
+                          : <span className="pill">Disk: {getPricingModeLabel(getEffectiveDiskPricingMode(catalogPricingMode))}</span>}
                       </div>
                       {!selectedFlavorSupportsPricingMode ? (
                         <p className="mt-3 text-sm text-amber-700">
@@ -2062,7 +2084,7 @@ export default function Home() {
                       ) : null}
                       {catalogPricingMode === "RI" ? (
                         <p className="mt-3 text-sm text-slate-600">
-                          RI uses Huawei&apos;s effective hourly VM rate. Disk pricing stays on-demand because the cached disk catalog does not expose RI plans.
+                          RI uses Huawei&apos;s RI purchase price. Disk pricing is excluded because the cached disk catalog does not expose RI plans.
                         </p>
                       ) : null}
                       <p className="mt-4 text-sm leading-6 text-slate-600">

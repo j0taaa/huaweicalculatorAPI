@@ -128,7 +128,7 @@ describe("catalog helpers", () => {
 
     expect(getFlavorBasePrice(flavor, "MONTHLY")).toBe(33.85);
     expect(getFlavorBasePrice(flavor, "YEARLY")).toBe(310.28);
-    expect(getFlavorBasePrice(flavor, "RI")).toBe(0.0617);
+    expect(getFlavorBasePrice(flavor, "RI")).toBe(45.04);
   });
 
   test("getEffectiveDiskPricingMode falls back to ONDEMAND for RI", () => {
@@ -236,7 +236,7 @@ describe("catalog helpers", () => {
     });
   });
 
-  test("buildCatalogPriceEstimate uses RI VM pricing and ONDEMAND disk fallback", () => {
+  test("buildCatalogPriceEstimate uses RI purchase pricing without hourly disk math", () => {
     const estimate = buildCatalogPriceEstimate({
       product: {
         ec2_vm: [
@@ -265,24 +265,24 @@ describe("catalog helpers", () => {
     });
 
     expect(estimate).toEqual({
-      amount: 11.0808,
+      amount: 45.04,
       discountAmount: 0,
-      originalAmount: 11.0808,
+      originalAmount: 45.04,
       currency: "USD",
       productRatingResult: [
         {
           id: "cached-vm-vm-ri",
           productId: "vm-ri",
-          amount: 1.4808,
+          amount: 45.04,
           discountAmount: 0,
-          originalAmount: 1.4808,
+          originalAmount: 45.04,
         },
         {
           id: "cached-disk-disk-ondemand",
           productId: "disk-ondemand",
-          amount: 9.6,
+          amount: 0,
           discountAmount: 0,
-          originalAmount: 9.6,
+          originalAmount: 0,
         },
       ],
     });
