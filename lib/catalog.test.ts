@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { dedupeCatalogFlavors, getCatalogFlavors, getFlavorPrice, type ProductFlavor } from "@/lib/catalog";
+import { dedupeCatalogFlavors, getCatalogFlavors, getFlavorBasePrice, type ProductFlavor } from "@/lib/catalog";
 
 function makeFlavor(
   resourceSpecCode: string,
@@ -12,14 +12,21 @@ function makeFlavor(
 }
 
 describe("catalog helpers", () => {
-  test("getFlavorPrice prefers inquiry result, then amount, then priced plans", () => {
-    expect(getFlavorPrice(makeFlavor("ecs.1", { inquiryResult: { amount: 7 } }))).toBe(7);
-    expect(getFlavorPrice(makeFlavor("ecs.2", { amount: 11 }))).toBe(11);
-    expect(getFlavorPrice(makeFlavor("ecs.3", {
+  test("getFlavorBasePrice prefers ONDEMAND plans and ignores rolled-up inquiry totals", () => {
+    expect(getFlavorBasePrice(makeFlavor("ecs.1", {
+      amount: 11,
+      inquiryResult: { amount: 700 },
+      bakPlanList: [{ billingMode: "ONDEMAND", amount: 7 }],
+    }))).toBe(7);
+    expect(getFlavorBasePrice(makeFlavor("ecs.2", { amount: 11 }))).toBe(11);
+    expect(getFlavorBasePrice(makeFlavor("ecs.3", {
       planList: [{ billingMode: "PERIOD", amount: 30 }],
       bakPlanList: [{ billingMode: "ONDEMAND", amount: 13 }],
     }))).toBe(13);
-    expect(getFlavorPrice(makeFlavor("ecs.4"))).toBe(Number.POSITIVE_INFINITY);
+    expect(getFlavorBasePrice(makeFlavor("ecs.4", {
+      inquiryResult: { perAmount: 5, amount: 50 },
+    }))).toBe(5);
+    expect(getFlavorBasePrice(makeFlavor("ecs.5"))).toBe(Number.POSITIVE_INFINITY);
   });
 
   test("dedupeCatalogFlavors keeps one flavor per code and prefers the cheaper duplicate", () => {
@@ -55,7 +62,7 @@ describe("catalog helpers", () => {
     });
 
     expect(flavors).toHaveLength(2);
-    expect(flavors.map((flavor) => [flavor.resourceSpecCode, getFlavorPrice(flavor)])).toEqual([
+    expect(flavors.map((flavor) => [flavor.resourceSpecCode, getFlavorBasePrice(flavor)])).toEqual([
       ["x1.small", 6],
       ["x1.medium", 12],
     ]);

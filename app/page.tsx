@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
-import { getCatalogFlavors, getFlavorPrice, type ProductFlavor } from "@/lib/catalog";
+import { getCatalogFlavors, getFlavorBasePrice, type ProductFlavor } from "@/lib/catalog";
 
 type Template = {
   id: string;
@@ -184,6 +184,20 @@ type EditorTarget =
       kind: "remote";
       id: string;
     };
+
+const FILTER_VCPU_OPTIONS = ["0", "1", "2", "4", "8", "16", "32", "64"];
+const FILTER_RAM_OPTIONS = ["0", "2", "4", "8", "16", "32", "64", "128", "256", "512"];
+const CONFIG_HOUR_OPTIONS = ["24", "168", "360", "720", "744"];
+const CONFIG_QUANTITY_OPTIONS = ["1", "2", "3", "5", "10"];
+
+function withCurrentOption(options: string[], current: string): string[] {
+  const trimmed = current.trim();
+  if (!trimmed || options.includes(trimmed)) {
+    return options;
+  }
+
+  return [trimmed, ...options];
+}
 
 function pretty(value: unknown): string {
   if (typeof value === "string") {
@@ -678,8 +692,8 @@ export default function Home() {
       .filter((flavor) => getFlavorCpuCount(flavor) >= (Number.parseInt(catalogMinVcpu, 10) || 0))
       .filter((flavor) => getFlavorMemoryGb(flavor) >= (Number.parseInt(catalogMinRam, 10) || 0))
       .sort((left, right) => {
-        const leftPrice = getFlavorPrice(left);
-        const rightPrice = getFlavorPrice(right);
+        const leftPrice = getFlavorBasePrice(left);
+        const rightPrice = getFlavorBasePrice(right);
         return catalogSort === "price-desc" ? rightPrice - leftPrice : leftPrice - rightPrice;
       });
   }, [catalogMinRam, catalogMinVcpu, catalogSort, deferredCatalogSearch, flavors]);
@@ -697,6 +711,10 @@ export default function Home() {
   const totalFlavorPages = Math.max(1, Math.ceil(filteredFlavors.length / flavorsPerPage));
   const paginatedCarts = cartsSorted.slice((cartPage - 1) * cartsPerPage, cartPage * cartsPerPage);
   const paginatedFlavors = filteredFlavors.slice((flavorPage - 1) * flavorsPerPage, flavorPage * flavorsPerPage);
+  const catalogMinVcpuOptions = withCurrentOption(FILTER_VCPU_OPTIONS, catalogMinVcpu);
+  const catalogMinRamOptions = withCurrentOption(FILTER_RAM_OPTIONS, catalogMinRam);
+  const configHourOptions = withCurrentOption(CONFIG_HOUR_OPTIONS, configHours);
+  const configQuantityOptions = withCurrentOption(CONFIG_QUANTITY_OPTIONS, configQuantity);
 
   useEffect(() => {
     setCartPage(1);
@@ -1546,28 +1564,30 @@ export default function Home() {
                       <label className="label" htmlFor="catalog-min-vcpu">
                         Min vCPU
                       </label>
-                      <input
-                        className="field"
-                        id="catalog-min-vcpu"
-                        onChange={(event) => setCatalogMinVcpu(event.target.value)}
-                        value={catalogMinVcpu}
-                      />
+                      <select className="field" id="catalog-min-vcpu" onChange={(event) => setCatalogMinVcpu(event.target.value)} value={catalogMinVcpu}>
+                        {catalogMinVcpuOptions.map((option) => (
+                          <option key={option} value={option}>
+                            {option === "0" ? "Any" : option}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                     <div>
                       <label className="label" htmlFor="catalog-min-ram">
                         Min RAM (GB)
                       </label>
-                      <input
-                        className="field"
-                        id="catalog-min-ram"
-                        onChange={(event) => setCatalogMinRam(event.target.value)}
-                        value={catalogMinRam}
-                      />
+                      <select className="field" id="catalog-min-ram" onChange={(event) => setCatalogMinRam(event.target.value)} value={catalogMinRam}>
+                        {catalogMinRamOptions.map((option) => (
+                          <option key={option} value={option}>
+                            {option === "0" ? "Any" : option}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   </div>
 
                   <label className="label mt-3" htmlFor="catalog-sort">
-                    Sort by price
+                    Sort by base price
                   </label>
                   <select
                     className="field"
@@ -1592,7 +1612,7 @@ export default function Home() {
                     <span>vCPU</span>
                     <span>RAM</span>
                     <span>Type</span>
-                    <span>Base price</span>
+                    <span>Base hourly price</span>
                   </div>
 
                   <div className="mt-2 space-y-2">
@@ -1615,7 +1635,7 @@ export default function Home() {
                         <div className="text-sm text-slate-700">{getFlavorMemoryGb(flavor).toFixed(0)} GB</div>
                         <div className="text-sm text-slate-700">{flavor.performType ?? "General"}</div>
                         <div className="text-sm font-semibold text-slate-900">
-                          {Number.isFinite(getFlavorPrice(flavor)) ? getFlavorPrice(flavor).toFixed(4) : "-"}
+                          {Number.isFinite(getFlavorBasePrice(flavor)) ? getFlavorBasePrice(flavor).toFixed(4) : "-"}
                         </div>
                       </button>
                     ))}
@@ -1688,13 +1708,25 @@ export default function Home() {
                       <label className="label" htmlFor="config-hours">
                         Hours
                       </label>
-                      <input className="field" id="config-hours" onChange={(event) => setConfigHours(event.target.value)} value={configHours} />
+                      <select className="field" id="config-hours" onChange={(event) => setConfigHours(event.target.value)} value={configHours}>
+                        {configHourOptions.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                     <div>
                       <label className="label" htmlFor="config-quantity">
                         Quantity
                       </label>
-                      <input className="field" id="config-quantity" onChange={(event) => setConfigQuantity(event.target.value)} value={configQuantity} />
+                      <select className="field" id="config-quantity" onChange={(event) => setConfigQuantity(event.target.value)} value={configQuantity}>
+                        {configQuantityOptions.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                     <div>
                       <label className="label" htmlFor="config-disk-type">
@@ -1722,6 +1754,9 @@ export default function Home() {
                     <>
                       <p className="mt-3 text-2xl font-semibold text-slate-900">{selectedFlavor.resourceSpecCode}</p>
                       <p className="mt-1 text-sm text-slate-600">{getFlavorLabel(selectedFlavor)}</p>
+                      <p className="mt-3 text-sm font-semibold text-slate-900">
+                        Base hourly price: {Number.isFinite(getFlavorBasePrice(selectedFlavor)) ? getFlavorBasePrice(selectedFlavor).toFixed(4) : "-"}
+                      </p>
                       <p className="mt-4 text-sm leading-6 text-slate-600">
                         {selectedFlavor.productSpecDesc || selectedFlavor.productSpecSysDesc || "No description available"}
                       </p>

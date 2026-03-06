@@ -79,15 +79,7 @@ function getFlavorPlanCount(flavor: ProductFlavor): number {
   return (flavor.planList?.length ?? 0) + (flavor.bakPlanList?.length ?? 0);
 }
 
-export function getFlavorPrice(flavor: ProductFlavor): number {
-  if (typeof flavor.inquiryResult?.amount === "number") {
-    return flavor.inquiryResult.amount;
-  }
-
-  if (typeof flavor.amount === "number") {
-    return flavor.amount;
-  }
-
+export function getFlavorBasePrice(flavor: ProductFlavor): number {
   const pricedPlan = [...(flavor.planList ?? []), ...(flavor.bakPlanList ?? [])].find((plan) => (
     typeof plan.amount === "number" && plan.billingMode === "ONDEMAND"
   ));
@@ -95,17 +87,29 @@ export function getFlavorPrice(flavor: ProductFlavor): number {
     return pricedPlan.amount;
   }
 
+  if (typeof flavor.amount === "number") {
+    return flavor.amount;
+  }
+
   const fallbackPlan = [...(flavor.planList ?? []), ...(flavor.bakPlanList ?? [])].find((plan) => typeof plan.amount === "number");
   if (typeof fallbackPlan?.amount === "number") {
     return fallbackPlan.amount;
+  }
+
+  if (typeof flavor.inquiryResult?.perAmount === "number") {
+    return flavor.inquiryResult.perAmount;
+  }
+
+  if (typeof flavor.inquiryResult?.amount === "number") {
+    return flavor.inquiryResult.amount;
   }
 
   return Number.POSITIVE_INFINITY;
 }
 
 function shouldPreferFlavor(candidate: ProductFlavor, current: ProductFlavor): boolean {
-  const candidatePrice = getFlavorPrice(candidate);
-  const currentPrice = getFlavorPrice(current);
+  const candidatePrice = getFlavorBasePrice(candidate);
+  const currentPrice = getFlavorBasePrice(current);
 
   if (Number.isFinite(candidatePrice) && !Number.isFinite(currentPrice)) {
     return true;
