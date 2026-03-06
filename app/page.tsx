@@ -484,6 +484,7 @@ export default function Home() {
   const [newCartName, setNewCartName] = useState("Team proposal cart");
   const [cartLoading, setCartLoading] = useState(false);
   const [createCartLoading, setCreateCartLoading] = useState(false);
+  const [cartPage, setCartPage] = useState(1);
 
   const [catalogRegion, setCatalogRegion] = useState("ap-southeast-3");
   const [catalogSearch, setCatalogSearch] = useState("");
@@ -493,6 +494,7 @@ export default function Home() {
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogResult, setCatalogResult] = useState<ReplayResult | null>(null);
   const [selectedFlavorCode, setSelectedFlavorCode] = useState("");
+  const [flavorPage, setFlavorPage] = useState(1);
 
   const [configRegion, setConfigRegion] = useState("sa-brazil-1");
   const [configDiskType, setConfigDiskType] = useState("GPSSD");
@@ -578,6 +580,9 @@ export default function Home() {
   const normalizedCookie = extractMinimalCookie(cookie);
   const flavors = getCatalogFlavors(catalogResult?.response.body);
   const deferredCatalogSearch = useDeferredValue(catalogSearch);
+  const cartsSorted = useMemo(() => {
+    return [...carts].sort((left, right) => (right.updateTime ?? 0) - (left.updateTime ?? 0));
+  }, [carts]);
   const filteredFlavors = useMemo(() => {
     return flavors
       .filter((flavor) => {
@@ -599,6 +604,32 @@ export default function Home() {
   const selectedFlavor = getSelectedFlavor(flavors, selectedFlavorCode);
   const estimateBody = estimateResult?.response.body as PriceResponseBody | undefined;
   const stagedTotal = calculatorItems.reduce((sum, item) => sum + item.totalAmount, 0);
+  const cartsPerPage = 6;
+  const flavorsPerPage = 12;
+  const totalCartPages = Math.max(1, Math.ceil(cartsSorted.length / cartsPerPage));
+  const totalFlavorPages = Math.max(1, Math.ceil(filteredFlavors.length / flavorsPerPage));
+  const paginatedCarts = cartsSorted.slice((cartPage - 1) * cartsPerPage, cartPage * cartsPerPage);
+  const paginatedFlavors = filteredFlavors.slice((flavorPage - 1) * flavorsPerPage, flavorPage * flavorsPerPage);
+
+  useEffect(() => {
+    setCartPage(1);
+  }, [carts.length]);
+
+  useEffect(() => {
+    setFlavorPage(1);
+  }, [catalogSearch, catalogMinVcpu, catalogMinRam, catalogSort, catalogRegion, catalogResult]);
+
+  useEffect(() => {
+    if (cartPage > totalCartPages) {
+      setCartPage(totalCartPages);
+    }
+  }, [cartPage, totalCartPages]);
+
+  useEffect(() => {
+    if (flavorPage > totalFlavorPages) {
+      setFlavorPage(totalFlavorPages);
+    }
+  }, [flavorPage, totalFlavorPages]);
 
   async function replayOne(
     id: string,
@@ -978,31 +1009,47 @@ export default function Home() {
               <div className="mt-4">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <p className="section-title">All carts</p>
-                  <span className="pill">{carts.length}</span>
+                  <span className="pill">{cartsSorted.length}</span>
                 </div>
-                {carts.length ? (
-                  <div className="sidebar-list">
-                    {carts.map((cart) => (
-                      <button
-                        key={cart.key}
-                        className={`cart-card ${selectedCartKey === cart.key ? "cart-card-active" : ""}`}
-                        onClick={() => {
-                          setSelectedCartKey(cart.key);
-                          setSelectedCartName(cart.name || "");
-                        }}
-                        type="button"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="font-semibold text-slate-900">{cart.name || "Untitled cart"}</p>
-                            <p className="mt-1 text-xs text-slate-500">{formatDate(cart.updateTime)}</p>
+                {cartsSorted.length ? (
+                  <>
+                    <div className="sidebar-list">
+                      {paginatedCarts.map((cart) => (
+                        <button
+                          key={cart.key}
+                          className={`cart-card ${selectedCartKey === cart.key ? "cart-card-active" : ""}`}
+                          onClick={() => {
+                            setSelectedCartKey(cart.key);
+                            setSelectedCartName(cart.name || "");
+                          }}
+                          type="button"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="font-semibold text-slate-900">{cart.name || "Untitled cart"}</p>
+                              <p className="mt-1 text-xs text-slate-500">{formatDate(cart.updateTime)}</p>
+                            </div>
+                            <span className="pill">{(cart.totalPrice?.amount ?? 0).toFixed?.(2) ?? cart.totalPrice?.amount ?? 0}</span>
                           </div>
-                          <span className="pill">{(cart.totalPrice?.amount ?? 0).toFixed?.(2) ?? cart.totalPrice?.amount ?? 0}</span>
-                        </div>
-                        <p className="mt-3 break-all font-mono text-xs text-slate-600">{cart.key}</p>
-                      </button>
-                    ))}
-                  </div>
+                          <p className="mt-3 break-all font-mono text-xs text-slate-600">{cart.key}</p>
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="pagination-bar mt-4">
+                      <span className="text-sm text-slate-500">
+                        Page {cartPage} of {totalCartPages}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button className="btn btn-secondary btn-small" disabled={cartPage <= 1} onClick={() => setCartPage((page) => page - 1)} type="button">
+                          Previous
+                        </button>
+                        <button className="btn btn-secondary btn-small" disabled={cartPage >= totalCartPages} onClick={() => setCartPage((page) => page + 1)} type="button">
+                          Next
+                        </button>
+                      </div>
+                    </div>
+                  </>
                 ) : (
                   <p className="text-sm text-slate-500">
                     {normalizedCookie ? "Refresh carts to load your live Huawei cart list." : "Open Session and paste your HWS_INTL_ID to load carts."}
@@ -1152,6 +1199,7 @@ export default function Home() {
                   <div className="mt-4 flex flex-wrap gap-2">
                     <span className="pill">{filteredFlavors.length} shown</span>
                     <span className="pill">{flavors.length} total</span>
+                    <span className="pill">Page {flavorPage} / {totalFlavorPages}</span>
                   </div>
                 </div>
 
@@ -1165,7 +1213,7 @@ export default function Home() {
                   </div>
 
                   <div className="mt-2 space-y-2">
-                    {filteredFlavors.map((flavor) => (
+                    {paginatedFlavors.map((flavor) => (
                       <button
                         key={flavor.resourceSpecCode}
                         className={`flavor-row ${selectedFlavorCode === flavor.resourceSpecCode ? "flavor-row-active" : ""}`}
@@ -1189,6 +1237,22 @@ export default function Home() {
                       </button>
                     ))}
                   </div>
+
+                  {filteredFlavors.length ? (
+                    <div className="pagination-bar mt-4">
+                      <span className="text-sm text-slate-500">
+                        Showing {(flavorPage - 1) * flavorsPerPage + 1}-{Math.min(flavorPage * flavorsPerPage, filteredFlavors.length)} of {filteredFlavors.length}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button className="btn btn-secondary btn-small" disabled={flavorPage <= 1} onClick={() => setFlavorPage((page) => page - 1)} type="button">
+                          Previous
+                        </button>
+                        <button className="btn btn-secondary btn-small" disabled={flavorPage >= totalFlavorPages} onClick={() => setFlavorPage((page) => page + 1)} type="button">
+                          Next
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
 
                   {!filteredFlavors.length ? (
                     <p className="mt-4 text-sm text-slate-500">
