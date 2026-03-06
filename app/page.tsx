@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { getCatalogFlavors, getFlavorPrice, type ProductFlavor } from "@/lib/catalog";
 
 type Template = {
   id: string;
@@ -117,83 +118,6 @@ type RemoteCartItem = {
   payload: CalculatorCartItemPayload;
 };
 
-type ProductFlavor = {
-  resourceSpecCode: string;
-  cloudServiceType?: string;
-  resourceType?: string;
-  productSpecSysDesc?: string;
-  productSpec?: string;
-  productSpecDesc?: string;
-  resourceSpecType?: string;
-  mem?: string;
-  cpu?: string;
-  instanceArch?: string;
-  performType?: string;
-  series?: string;
-  image?: string;
-  spec?: string;
-  arch?: string;
-  generation?: string;
-  vmType?: string;
-  productId?: string;
-  billingMode?: string;
-  siteCode?: string;
-  periodNum?: number | null;
-  billingEvent?: string;
-  measureUnitStep?: number;
-  measureUnit?: number;
-  usageFactor?: string;
-  usageMeasureId?: number;
-  amount?: number;
-  productNum?: number;
-  inquiryTag?: string;
-  selfProductNum?: number;
-  transRate?: string;
-  transTarget?: string;
-  usageValue?: number;
-  usageMeasureName?: string;
-  usageMeasurePluralName?: string;
-  selectIndex?: number;
-  planList?: Array<{
-    productId?: string;
-    billingMode?: string;
-    siteCode?: string;
-    periodNum?: number | null;
-    billingEvent?: string;
-    measureUnitStep?: number | null;
-    measureUnit?: number | null;
-    usageFactor?: string;
-    usageMeasureId?: number;
-    amount?: number;
-  }>;
-  bakPlanList?: Array<{
-    productId?: string;
-    billingMode?: string;
-    siteCode?: string;
-    periodNum?: number | null;
-    billingEvent?: string;
-    measureUnitStep?: number | null;
-    measureUnit?: number | null;
-    usageFactor?: string;
-    usageMeasureId?: number;
-    amount?: number;
-  }>;
-  inquiryResult?: {
-    id?: string;
-    productId?: string;
-    amount?: number;
-    discountAmount?: number;
-    originalAmount?: number;
-    perAmount?: number | null;
-    perDiscountAmount?: number | null;
-    perOriginalAmount?: number | null;
-    perPeriodType?: number | null;
-    measureId?: number;
-    extendParams?: unknown;
-  };
-  [key: string]: unknown;
-};
-
 type PricePayload = {
   regionId: string;
   chargingMode: number;
@@ -285,24 +209,6 @@ function findTemplate(templates: Template[], id: string): Template | undefined {
   return templates.find((template) => template.id === id);
 }
 
-function getCatalogFlavors(body: unknown): ProductFlavor[] {
-  if (!body || typeof body !== "object") {
-    return [];
-  }
-
-  const product = (body as { product?: Record<string, unknown> }).product;
-  if (!product || typeof product !== "object") {
-    return [];
-  }
-
-  const vmList = product.ec2_vm;
-  if (!Array.isArray(vmList)) {
-    return [];
-  }
-
-  return vmList as ProductFlavor[];
-}
-
 function getCartList(body: unknown): CartSummary[] {
   if (!body || typeof body !== "object") {
     return [];
@@ -380,30 +286,6 @@ function getFlavorMemoryGb(flavor: ProductFlavor): number {
   const memText = flavor.mem ?? "";
   const memMatch = memText.match(/(\d+(?:\.\d+)?)/);
   return memMatch ? Number.parseFloat(memMatch[1]) : 0;
-}
-
-function getFlavorPrice(flavor: ProductFlavor): number {
-  if (typeof flavor.inquiryResult?.amount === "number") {
-    return flavor.inquiryResult.amount;
-  }
-
-  if (typeof flavor.amount === "number") {
-    return flavor.amount;
-  }
-
-  const pricedPlan = [...(flavor.planList ?? []), ...(flavor.bakPlanList ?? [])].find((plan) => (
-    typeof plan.amount === "number" && plan.billingMode === "ONDEMAND"
-  ));
-  if (typeof pricedPlan?.amount === "number") {
-    return pricedPlan.amount;
-  }
-
-  const fallbackPlan = [...(flavor.planList ?? []), ...(flavor.bakPlanList ?? [])].find((plan) => typeof plan.amount === "number");
-  if (typeof fallbackPlan?.amount === "number") {
-    return fallbackPlan.amount;
-  }
-
-  return Number.POSITIVE_INFINITY;
 }
 
 function getFlavorSpec(flavor: ProductFlavor): string {
