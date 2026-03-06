@@ -154,6 +154,30 @@ type ProductFlavor = {
   usageMeasureName?: string;
   usageMeasurePluralName?: string;
   selectIndex?: number;
+  planList?: Array<{
+    productId?: string;
+    billingMode?: string;
+    siteCode?: string;
+    periodNum?: number | null;
+    billingEvent?: string;
+    measureUnitStep?: number | null;
+    measureUnit?: number | null;
+    usageFactor?: string;
+    usageMeasureId?: number;
+    amount?: number;
+  }>;
+  bakPlanList?: Array<{
+    productId?: string;
+    billingMode?: string;
+    siteCode?: string;
+    periodNum?: number | null;
+    billingEvent?: string;
+    measureUnitStep?: number | null;
+    measureUnit?: number | null;
+    usageFactor?: string;
+    usageMeasureId?: number;
+    amount?: number;
+  }>;
   inquiryResult?: {
     id?: string;
     productId?: string;
@@ -365,6 +389,18 @@ function getFlavorPrice(flavor: ProductFlavor): number {
 
   if (typeof flavor.amount === "number") {
     return flavor.amount;
+  }
+
+  const pricedPlan = [...(flavor.planList ?? []), ...(flavor.bakPlanList ?? [])].find((plan) => (
+    typeof plan.amount === "number" && plan.billingMode === "ONDEMAND"
+  ));
+  if (typeof pricedPlan?.amount === "number") {
+    return pricedPlan.amount;
+  }
+
+  const fallbackPlan = [...(flavor.planList ?? []), ...(flavor.bakPlanList ?? [])].find((plan) => typeof plan.amount === "number");
+  if (typeof fallbackPlan?.amount === "number") {
+    return fallbackPlan.amount;
   }
 
   return Number.POSITIVE_INFINITY;
