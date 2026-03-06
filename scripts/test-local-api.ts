@@ -69,11 +69,18 @@ async function main() {
     }
 
     const replayData = (await replayResponse.json()) as {
+      authExpired?: boolean;
+      error?: string;
       response: {
         status: number;
         ok: boolean;
       };
     };
+
+    if (replayResponse.status === 401 && replayData.authExpired) {
+      console.log(`SKIP ${template.name}: Huawei session expired`);
+      continue;
+    }
 
     if (!replayData.response.ok) {
       throw new Error(`Remote endpoint failed for ${template.name}: ${replayData.response.status}`);
@@ -101,6 +108,7 @@ async function main() {
     }
 
     const cartDetailData = (await cartDetailResponse.json()) as {
+      authExpired?: boolean;
       response: {
         ok: boolean;
         status: number;
@@ -109,6 +117,11 @@ async function main() {
         };
       };
     };
+
+    if (cartDetailResponse.status === 401 && cartDetailData.authExpired) {
+      console.log("SKIP Cart detail: Huawei session expired");
+      return;
+    }
 
     if (!cartDetailData.response.ok || cartDetailData.response.body?.retCode !== "200") {
       throw new Error(`Cart detail lookup failed: ${cartDetailData.response.status}`);

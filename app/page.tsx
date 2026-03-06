@@ -25,6 +25,9 @@ type Template = {
 };
 
 type ReplayResult = {
+  authExpired?: boolean;
+  authCode?: string;
+  authMessage?: string;
   endpoint: {
     id: string;
     name: string;
@@ -49,6 +52,9 @@ type ReplayResult = {
 };
 
 type CartDetailResult = {
+  authExpired?: boolean;
+  authCode?: string;
+  authMessage?: string;
   request: {
     method: string;
     url: string;
@@ -1006,8 +1012,11 @@ export default function Home() {
       }),
     });
 
-    const data = (await response.json()) as ReplayResult & { error?: string };
+    const data = (await response.json()) as ReplayResult & { error?: string; authExpired?: boolean };
     if (!response.ok) {
+      if (response.status === 401 && data.authExpired) {
+        throw new Error(data.error ?? "Huawei session expired. Open Session and paste a fresh cookie or HWS_INTL_ID.");
+      }
       throw new Error(data.error ?? `Replay failed with status ${response.status}`);
     }
 
@@ -1051,8 +1060,11 @@ export default function Home() {
         }),
       });
 
-      const data = (await response.json()) as CartDetailResult & { error?: string };
+      const data = (await response.json()) as CartDetailResult & { error?: string; authExpired?: boolean };
       if (!response.ok) {
+        if (response.status === 401 && data.authExpired) {
+          throw new Error(data.error ?? "Huawei session expired. Open Session and paste a fresh cookie or HWS_INTL_ID.");
+        }
         throw new Error(data.error ?? `Cart detail lookup failed with status ${response.status}`);
       }
 

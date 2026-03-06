@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
       ...snapshot.entry,
       cache: {
         ...snapshot.meta,
-        source: "startup-catalog-cache",
+        source: "sqlite-catalog-cache",
         region,
       },
       regions: snapshot.regions,
