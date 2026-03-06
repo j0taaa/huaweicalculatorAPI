@@ -1,7 +1,15 @@
 "use client";
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
-import { buildCatalogPriceEstimate, getCatalogFlavors, getFlavorBasePrice, type PriceResponseBody, type ProductFlavor } from "@/lib/catalog";
+import {
+  buildCatalogPriceEstimate,
+  getCatalogDisks,
+  getCatalogFlavors,
+  getFlavorBasePrice,
+  type PriceResponseBody,
+  type ProductDisk,
+  type ProductFlavor,
+} from "@/lib/catalog";
 
 type Template = {
   id: string;
@@ -67,6 +75,35 @@ type CartSummary = {
     amount?: number;
     originalAmount?: number;
   };
+};
+
+type CatalogRegion = {
+  id: string;
+  name: string;
+};
+
+type CatalogCacheMeta = {
+  refreshIntervalMs?: number;
+  warming?: boolean;
+  lastRefreshStartedAt?: string | null;
+  lastRefreshCompletedAt?: string | null;
+  cachedRegionCount?: number;
+  source?: string;
+  region?: string;
+};
+
+type CatalogCacheResult = ReplayResult & {
+  cache?: CatalogCacheMeta;
+  regions?: CatalogRegion[];
+  regionErrors?: Record<string, string>;
+  error?: string;
+};
+
+type CatalogRegionListResult = {
+  cache?: CatalogCacheMeta;
+  regions?: CatalogRegion[];
+  regionErrors?: Record<string, string>;
+  error?: string;
 };
 
 type ShareCartItemPayload = {
@@ -173,6 +210,9 @@ type EditorTarget =
 
 const CONFIG_HOUR_OPTIONS = ["24", "168", "360", "720", "744"];
 const CONFIG_QUANTITY_OPTIONS = ["1", "2", "3", "5", "10"];
+const DEFAULT_CONFIG_REGION = "sa-brazil-1";
+const DEFAULT_CATALOG_REGION = "ap-southeast-3";
+const DEFAULT_CATALOG_DISK_TYPE = "GPSSD";
 
 function withCurrentOption(options: string[], current: string): string[] {
   const trimmed = current.trim();
@@ -181,6 +221,31 @@ function withCurrentOption(options: string[], current: string): string[] {
   }
 
   return [trimmed, ...options];
+}
+
+function mergeCatalogRegions(regions: CatalogRegion[], ...extraRegionIds: string[]): CatalogRegion[] {
+  const merged = new Map<string, CatalogRegion>();
+
+  for (const regionId of [DEFAULT_CONFIG_REGION, ...extraRegionIds]) {
+    const trimmed = regionId.trim();
+    if (trimmed && !merged.has(trimmed)) {
+      merged.set(trimmed, { id: trimmed, name: trimmed });
+    }
+  }
+
+  for (const region of regions) {
+    const id = region.id.trim();
+    if (!id || merged.has(id)) {
+      continue;
+    }
+
+    merged.set(id, {
+      id,
+      name: region.name.trim() || id,
+    });
+  }
+
+  return [...merged.values()];
 }
 
 function buildCachedEstimateResult(
@@ -333,6 +398,11 @@ function getFlavorSpec(flavor: ProductFlavor): string {
   }
 
   return flavor.resourceSpecCode.replace(/\.linux$/, "");
+}
+
+function getDiskTypeLabel(disk: ProductDisk): string {
+  const description = typeof disk.productSpecDesc === "string" ? disk.productSpecDesc.trim() : "";
+  return description ? `${disk.resourceSpecCode} · ${description}` : disk.resourceSpecCode;
 }
 
 function getSelectedFlavor(flavors: ProductFlavor[], code: string): ProductFlavor | null {
@@ -605,18 +675,21 @@ export default function Home() {
   const [cartDetailResult, setCartDetailResult] = useState<CartDetailResult | null>(null);
   const [cartDetailCache, setCartDetailCache] = useState<Record<string, ShareCartDetail>>({});
 
-  const [catalogRegion, setCatalogRegion] = useState("ap-southeast-3");
+  const [catalogRegion, setCatalogRegion] = useState(DEFAULT_CATALOG_REGION);
+  const [catalogRegions, setCatalogRegions] = useState<CatalogRegion[]>([
+    { id: DEFAULT_CONFIG_REGION, name: DEFAULT_CONFIG_REGION },
+  ]);
   const [catalogSearch, setCatalogSearch] = useState("");
   const [catalogMinVcpu, setCatalogMinVcpu] = useState("0");
   const [catalogMinRam, setCatalogMinRam] = useState("0");
   const [catalogSort, setCatalogSort] = useState("price-asc");
   const [catalogLoading, setCatalogLoading] = useState(false);
-  const [catalogResult, setCatalogResult] = useState<ReplayResult | null>(null);
+  const [catalogResult, setCatalogResult] = useState<CatalogCacheResult | null>(null);
   const [selectedFlavorCode, setSelectedFlavorCode] = useState("");
   const [flavorPage, setFlavorPage] = useState(1);
 
-  const [configRegion, setConfigRegion] = useState("sa-brazil-1");
-  const [configDiskType, setConfigDiskType] = useState("GPSSD");
+  const [configRegion, setConfigRegion] = useState(DEFAULT_CONFIG_REGION);
+  const [configDiskType, setConfigDiskType] = useState(DEFAULT_CATALOG_DISK_TYPE);
   const [configDiskSize, setConfigDiskSize] = useState("40");
   const [configHours, setConfigHours] = useState("744");
   const [configQuantity, setConfigQuantity] = useState("1");
@@ -634,20 +707,27 @@ export default function Home() {
   useEffect(() => {
     void (async () => {
       try {
-        const response = await fetch("/api/templates", { cache: "no-store" });
-        if (!response.ok) {
-          throw new Error(`Failed to load templates: ${response.status}`);
+        const [templateResponse, regionResponse] = await Promise.all([
+          fetch("/api/templates", { cache: "no-store" }),
+          fetch("/api/catalog", { cache: "no-store" }),
+        ]);
+        if (!templateResponse.ok) {
+          throw new Error(`Failed to load templates: ${templateResponse.status}`);
         }
 
-        const data = (await response.json()) as { templates: Template[] };
+        const data = (await templateResponse.json()) as { templates: Template[] };
         setTemplates(data.templates);
+
+        if (regionResponse.ok) {
+          const regionData = (await regionResponse.json()) as CatalogRegionListResult;
+          setCatalogRegions((current) => mergeCatalogRegions(regionData.regions ?? current, DEFAULT_CATALOG_REGION, DEFAULT_CONFIG_REGION));
+        }
 
         const priceTemplate = findTemplate(data.templates, "get-price");
         const catalogTemplate = findTemplate(data.templates, "get-product-options-and-info");
 
         const priceBody = priceTemplate?.bodyJson as PricePayload | undefined;
-        if (priceBody?.regionId) {
-          setConfigRegion(priceBody.regionId);
+        if (priceBody) {
           const vmProduct = priceBody.productInfos[0];
           const diskProduct = priceBody.productInfos[1];
           if (typeof diskProduct?.resourceSpecCode === "string") {
@@ -666,6 +746,7 @@ export default function Home() {
           const region = url.searchParams.get("region");
           if (region) {
             setCatalogRegion(region);
+            setCatalogRegions((current) => mergeCatalogRegions(current, region, DEFAULT_CONFIG_REGION));
           }
         }
       } catch (error) {
@@ -699,6 +780,7 @@ export default function Home() {
 
   const normalizedCookie = extractMinimalCookie(cookie);
   const flavors = getCatalogFlavors(catalogResult?.response.body);
+  const catalogDisks = getCatalogDisks(catalogResult?.response.body);
   const deferredCatalogSearch = useDeferredValue(catalogSearch);
   const deferredSelectedCartKey = useDeferredValue(selectedCartKey);
   const cartsSorted = useMemo(() => {
@@ -736,6 +818,13 @@ export default function Home() {
   const totalFlavorPages = Math.max(1, Math.ceil(filteredFlavors.length / flavorsPerPage));
   const paginatedCarts = cartsSorted.slice((cartPage - 1) * cartsPerPage, cartPage * cartsPerPage);
   const paginatedFlavors = filteredFlavors.slice((flavorPage - 1) * flavorsPerPage, flavorPage * flavorsPerPage);
+  const configRegionOptions = useMemo(() => mergeCatalogRegions(catalogRegions, catalogRegion, configRegion), [catalogRegion, catalogRegions, configRegion]);
+  const configDiskTypeOptions = useMemo(() => {
+    return withCurrentOption(
+      [...new Set(catalogDisks.map((disk) => disk.resourceSpecCode.trim()).filter(Boolean))],
+      configDiskType,
+    );
+  }, [catalogDisks, configDiskType]);
   const configHourOptions = withCurrentOption(CONFIG_HOUR_OPTIONS, configHours);
   const configQuantityOptions = withCurrentOption(CONFIG_QUANTITY_OPTIONS, configQuantity);
 
@@ -787,12 +876,12 @@ export default function Home() {
     return data;
   }
 
-  async function fetchCatalogFromCache(region: string): Promise<ReplayResult> {
+  async function fetchCatalogFromCache(region: string): Promise<CatalogCacheResult> {
     const response = await fetch(`/api/catalog?region=${encodeURIComponent(region)}`, {
       cache: "no-store",
     });
 
-    const data = (await response.json()) as ReplayResult & { error?: string };
+    const data = (await response.json()) as CatalogCacheResult;
     if (!response.ok) {
       throw new Error(data.error ?? `Catalog cache lookup failed with status ${response.status}`);
     }
@@ -905,10 +994,11 @@ export default function Home() {
     setAppError("");
 
     try {
-      const nextRegion = region.trim() || "ap-southeast-3";
+      const nextRegion = region.trim() || DEFAULT_CATALOG_REGION;
       setCatalogRegion(nextRegion);
       const result = await fetchCatalogFromCache(nextRegion);
       setCatalogResult(result);
+      setCatalogRegions((current) => mergeCatalogRegions(result.regions ?? current, nextRegion, configRegion));
 
       const nextFlavors = getCatalogFlavors(result.response.body);
       const preferred = preferredFlavorCode
@@ -1020,13 +1110,13 @@ export default function Home() {
       const quantity = Number.parseInt(configQuantity, 10) || 1;
       const hours = Number.parseInt(configHours, 10) || 744;
       const diskSize = Number.parseInt(configDiskSize, 10) || 40;
-      const nextRegion = configRegion.trim() || catalogRegion.trim() || "ap-southeast-3";
+      const nextRegion = configRegion.trim() || catalogRegion.trim() || DEFAULT_CATALOG_REGION;
       const pricingCatalog = nextRegion === catalogRegion.trim() && catalogResult
         ? catalogResult
         : await fetchCatalogFromCache(nextRegion);
       const estimate = buildCatalogPriceEstimate(pricingCatalog.response.body, {
         flavorCode: selectedFlavor.resourceSpecCode,
-        diskType: configDiskType.trim() || "GPSSD",
+        diskType: configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
         diskSize,
         hours,
         quantity,
@@ -1037,12 +1127,13 @@ export default function Home() {
 
       setCatalogRegion(nextRegion);
       setCatalogResult(pricingCatalog);
+      setCatalogRegions((current) => mergeCatalogRegions(pricingCatalog.regions ?? current, nextRegion, configRegion));
 
       const result = buildCachedEstimateResult(
         estimate,
         nextRegion,
         selectedFlavor.resourceSpecCode,
-        configDiskType.trim() || "GPSSD",
+        configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
         diskSize,
         hours,
         quantity,
@@ -1074,10 +1165,10 @@ export default function Home() {
     const diskSize = Number.parseInt(configDiskSize, 10) || 40;
 
     const payload = buildCalculatorItemPayload(sampleItem, selectedFlavor, estimateBody, {
-      region: configRegion.trim() || "sa-brazil-1",
+      region: configRegion.trim() || DEFAULT_CONFIG_REGION,
       quantity,
       hours,
-      diskType: configDiskType.trim() || "GPSSD",
+      diskType: configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
       diskSize,
       title: configTitle.trim() || selectedFlavor.resourceSpecCode,
       description: configDescription.trim() || "Generated from the custom calculator",
@@ -1087,10 +1178,10 @@ export default function Home() {
       id: editingDraftItem?.id ?? `${Date.now()}-${selectedFlavor.resourceSpecCode}`,
       title: configTitle.trim() || selectedFlavor.resourceSpecCode,
       description: configDescription.trim() || "Generated from the custom calculator",
-      region: configRegion.trim() || "sa-brazil-1",
+      region: configRegion.trim() || DEFAULT_CONFIG_REGION,
       quantity,
       hours,
-      diskType: configDiskType.trim() || "GPSSD",
+      diskType: configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
       diskSize,
       flavorCode: selectedFlavor.resourceSpecCode,
       currency: estimateBody.currency ?? "USD",
@@ -1715,7 +1806,13 @@ export default function Home() {
                       <label className="label" htmlFor="config-region">
                         Workload region
                       </label>
-                      <input className="field" id="config-region" onChange={(event) => setConfigRegion(event.target.value)} value={configRegion} />
+                      <select className="field" id="config-region" onChange={(event) => setConfigRegion(event.target.value)} value={configRegion}>
+                        {configRegionOptions.map((region) => (
+                          <option key={region.id} value={region.id}>
+                            {region.name === region.id ? region.id : `${region.name} (${region.id})`}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                     <div>
                       <label className="label" htmlFor="config-title">
@@ -1751,7 +1848,16 @@ export default function Home() {
                       <label className="label" htmlFor="config-disk-type">
                         Disk type
                       </label>
-                      <input className="field" id="config-disk-type" onChange={(event) => setConfigDiskType(event.target.value)} value={configDiskType} />
+                      <select className="field" id="config-disk-type" onChange={(event) => setConfigDiskType(event.target.value)} value={configDiskType}>
+                        {configDiskTypeOptions.map((option) => {
+                          const disk = catalogDisks.find((item) => item.resourceSpecCode === option);
+                          return (
+                            <option key={option} value={option}>
+                              {disk ? getDiskTypeLabel(disk) : option}
+                            </option>
+                          );
+                        })}
+                      </select>
                     </div>
                     <div>
                       <label className="label" htmlFor="config-disk-size">
