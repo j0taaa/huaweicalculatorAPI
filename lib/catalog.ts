@@ -289,6 +289,44 @@ export function dedupeCatalogFlavors(flavors: ProductFlavor[]): ProductFlavor[] 
   return [...uniqueFlavors.values()];
 }
 
+function shouldPreferDisk(candidate: ProductDisk, current: ProductDisk): boolean {
+  const candidatePrice = getDiskBasePrice(candidate);
+  const currentPrice = getDiskBasePrice(current);
+
+  if (Number.isFinite(candidatePrice) && !Number.isFinite(currentPrice)) {
+    return true;
+  }
+
+  if (Number.isFinite(candidatePrice) && Number.isFinite(currentPrice) && candidatePrice < currentPrice) {
+    return true;
+  }
+
+  return false;
+}
+
+export function dedupeCatalogDisks(disks: ProductDisk[]): ProductDisk[] {
+  const uniqueDisks = new Map<string, ProductDisk>();
+
+  for (const disk of disks) {
+    const code = typeof disk.resourceSpecCode === "string" ? disk.resourceSpecCode.trim() : "";
+    if (!code) {
+      continue;
+    }
+
+    const current = uniqueDisks.get(code);
+    if (!current) {
+      uniqueDisks.set(code, disk);
+      continue;
+    }
+
+    if (shouldPreferDisk(disk, current)) {
+      uniqueDisks.set(code, disk);
+    }
+  }
+
+  return [...uniqueDisks.values()];
+}
+
 export function getCatalogDisks(body: unknown): ProductDisk[] {
   if (!body || typeof body !== "object") {
     return [];
@@ -304,7 +342,7 @@ export function getCatalogDisks(body: unknown): ProductDisk[] {
     return [];
   }
 
-  return diskList as ProductDisk[];
+  return dedupeCatalogDisks(diskList as ProductDisk[]);
 }
 
 function roundMoney(value: number): number {

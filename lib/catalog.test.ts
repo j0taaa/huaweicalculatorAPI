@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildCatalogPriceEstimate,
+  dedupeCatalogDisks,
   dedupeCatalogFlavors,
   getCatalogFlavors,
   getDiskBasePrice,
@@ -92,6 +93,26 @@ describe("catalog helpers", () => {
       amount: 1,
       bakPlanList: [{ billingMode: "ONDEMAND", amount: 0.000247 }],
     }))).toBe(0.000247);
+  });
+
+  test("dedupeCatalogDisks keeps one disk per code and prefers the cheaper duplicate", () => {
+    const deduped = dedupeCatalogDisks([
+      makeDisk("GPSSD", {
+        planList: [{ billingMode: "ONDEMAND", amount: 0.1 }],
+      }),
+      makeDisk("ESSD", {
+        amount: 0.2,
+      }),
+      makeDisk("GPSSD", {
+        planList: [{ billingMode: "ONDEMAND", amount: 0.01 }],
+      }),
+    ]);
+
+    expect(deduped).toHaveLength(2);
+    expect(deduped.map((disk) => [disk.resourceSpecCode, getDiskBasePrice(disk)])).toEqual([
+      ["GPSSD", 0.01],
+      ["ESSD", 0.2],
+    ]);
   });
 
   test("getFlavorBasePrice can read MONTHLY, YEARLY, and RI plan pricing", () => {
