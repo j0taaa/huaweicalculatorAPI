@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 
 type Template = {
   id: string;
@@ -507,6 +507,7 @@ export default function Home() {
   const [calculatorItems, setCalculatorItems] = useState<CalculatorItem[]>([]);
   const [publishLoading, setPublishLoading] = useState(false);
   const [publishResult, setPublishResult] = useState<ReplayResult | null>(null);
+  const [debugOpen, setDebugOpen] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -576,22 +577,25 @@ export default function Home() {
 
   const normalizedCookie = extractMinimalCookie(cookie);
   const flavors = getCatalogFlavors(catalogResult?.response.body);
-  const filteredFlavors = flavors
-    .filter((flavor) => {
-      if (!catalogSearch.trim()) {
-        return true;
-      }
+  const deferredCatalogSearch = useDeferredValue(catalogSearch);
+  const filteredFlavors = useMemo(() => {
+    return flavors
+      .filter((flavor) => {
+        if (!deferredCatalogSearch.trim()) {
+          return true;
+        }
 
-      const haystack = `${flavor.resourceSpecCode} ${flavor.productSpecDesc ?? ""} ${flavor.productSpecSysDesc ?? ""} ${flavor.performType ?? ""}`.toLowerCase();
-      return haystack.includes(catalogSearch.toLowerCase());
-    })
-    .filter((flavor) => getFlavorCpuCount(flavor) >= (Number.parseInt(catalogMinVcpu, 10) || 0))
-    .filter((flavor) => getFlavorMemoryGb(flavor) >= (Number.parseInt(catalogMinRam, 10) || 0))
-    .sort((left, right) => {
-      const leftPrice = getFlavorPrice(left);
-      const rightPrice = getFlavorPrice(right);
-      return catalogSort === "price-desc" ? rightPrice - leftPrice : leftPrice - rightPrice;
-    });
+        const haystack = `${flavor.resourceSpecCode} ${flavor.productSpecDesc ?? ""} ${flavor.productSpecSysDesc ?? ""} ${flavor.performType ?? ""}`.toLowerCase();
+        return haystack.includes(deferredCatalogSearch.toLowerCase());
+      })
+      .filter((flavor) => getFlavorCpuCount(flavor) >= (Number.parseInt(catalogMinVcpu, 10) || 0))
+      .filter((flavor) => getFlavorMemoryGb(flavor) >= (Number.parseInt(catalogMinRam, 10) || 0))
+      .sort((left, right) => {
+        const leftPrice = getFlavorPrice(left);
+        const rightPrice = getFlavorPrice(right);
+        return catalogSort === "price-desc" ? rightPrice - leftPrice : leftPrice - rightPrice;
+      });
+  }, [catalogMinRam, catalogMinVcpu, catalogSort, deferredCatalogSearch, flavors]);
   const selectedFlavor = getSelectedFlavor(flavors, selectedFlavorCode);
   const estimateBody = estimateResult?.response.body as PriceResponseBody | undefined;
   const stagedTotal = calculatorItems.reduce((sum, item) => sum + item.totalAmount, 0);
@@ -900,7 +904,7 @@ export default function Home() {
         </aside>
       ) : null}
 
-      <main className="mx-auto max-w-7xl space-y-6">
+      <main className="mx-auto max-w-[1500px] space-y-6">
         <section className="hero-card">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-3xl">
@@ -935,51 +939,49 @@ export default function Home() {
           ) : null}
         </section>
 
-        <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-          <section className="space-y-6">
-            <div className="card">
-              <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
+          <aside className="space-y-6 xl:sticky xl:top-6 xl:self-start">
+            <div className="sidebar-card">
+              <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="eyebrow">Step 1</p>
-                  <h2 className="mt-1 text-2xl font-semibold">Select or create a Huawei cart</h2>
+                  <p className="eyebrow">Cart Sidebar</p>
+                  <h2 className="mt-1 text-2xl font-semibold">Target cart</h2>
                 </div>
                 <button className="btn btn-secondary" disabled={cartLoading} onClick={() => void refreshCarts()} type="button">
-                  {cartLoading ? "Refreshing..." : "Refresh carts"}
+                  {cartLoading ? "Refreshing..." : "Refresh"}
                 </button>
               </div>
 
-              <div className="mt-5 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-                <div className="soft-panel">
-                  <p className="section-title">Create target cart</p>
-                  <label className="label mt-3" htmlFor="new-cart-name">
-                    Cart name
-                  </label>
-                  <input className="field" id="new-cart-name" onChange={(event) => setNewCartName(event.target.value)} value={newCartName} />
-                  <button className="btn btn-primary mt-4" disabled={createCartLoading || loadingTemplates} onClick={() => void createCart()} type="button">
-                    {createCartLoading ? "Creating..." : "Create cart"}
-                  </button>
-                </div>
-
-                <div className="soft-panel">
-                  <p className="section-title">Current target</p>
-                  <label className="label mt-3" htmlFor="selected-cart-key">
-                    Cart key
-                  </label>
-                  <input className="field" id="selected-cart-key" onChange={(event) => setSelectedCartKey(event.target.value)} value={selectedCartKey} />
-                  <label className="label mt-3" htmlFor="selected-cart-name">
-                    Cart name
-                  </label>
-                  <input className="field" id="selected-cart-name" onChange={(event) => setSelectedCartName(event.target.value)} value={selectedCartName} />
-                  <p className="mt-3 text-sm text-slate-500">
-                    Publishing writes the current calculator contents into this cart key.
-                  </p>
-                </div>
+              <div className="soft-panel mt-4">
+                <p className="section-title">Create a new cart</p>
+                <label className="label mt-3" htmlFor="new-cart-name">
+                  Cart name
+                </label>
+                <input className="field" id="new-cart-name" onChange={(event) => setNewCartName(event.target.value)} value={newCartName} />
+                <button className="btn btn-primary mt-4 w-full" disabled={createCartLoading || loadingTemplates} onClick={() => void createCart()} type="button">
+                  {createCartLoading ? "Creating..." : "Create cart"}
+                </button>
               </div>
 
-              <div className="mt-5">
-                <p className="section-title">Available carts</p>
+              <div className="soft-panel mt-4">
+                <p className="section-title">Current selection</p>
+                <label className="label mt-3" htmlFor="selected-cart-name">
+                  Cart name
+                </label>
+                <input className="field" id="selected-cart-name" onChange={(event) => setSelectedCartName(event.target.value)} value={selectedCartName} />
+                <label className="label mt-3" htmlFor="selected-cart-key">
+                  Cart key
+                </label>
+                <input className="field" id="selected-cart-key" onChange={(event) => setSelectedCartKey(event.target.value)} value={selectedCartKey} />
+              </div>
+
+              <div className="mt-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <p className="section-title">All carts</p>
+                  <span className="pill">{carts.length}</span>
+                </div>
                 {carts.length ? (
-                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <div className="sidebar-list">
                     {carts.map((cart) => (
                       <button
                         key={cart.key}
@@ -1002,14 +1004,81 @@ export default function Home() {
                     ))}
                   </div>
                 ) : (
-                  <p className="mt-3 text-sm text-slate-500">
+                  <p className="text-sm text-slate-500">
                     {normalizedCookie ? "Refresh carts to load your live Huawei cart list." : "Open Session and paste your HWS_INTL_ID to load carts."}
                   </p>
                 )}
               </div>
             </div>
 
-            <div className="card">
+            <div className="sidebar-card">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="eyebrow">Current Cart</p>
+                  <h2 className="mt-1 text-2xl font-semibold">Draft contents</h2>
+                </div>
+                <span className="pill">{calculatorItems.length} items</span>
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-2">
+                <div className="metric-card">
+                  <p className="metric-label">Draft total</p>
+                  <p className="metric-value">{stagedTotal.toFixed(2)}</p>
+                </div>
+                <div className="metric-card">
+                  <p className="metric-label">Target name</p>
+                  <p className="metric-value text-lg">{selectedCartName || "Unset"}</p>
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-3">
+                {calculatorItems.length ? (
+                  calculatorItems.map((item) => (
+                    <div key={item.id} className="result-strip">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-slate-900">{item.title}</p>
+                          <p className="mt-1 text-sm text-slate-600">{item.flavorCode}</p>
+                        </div>
+                        <button className="text-sm font-semibold text-slate-500" onClick={() => removeItem(item.id)} type="button">
+                          Remove
+                        </button>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <span className="pill">{item.quantity}x</span>
+                        <span className="pill">{item.hours}h</span>
+                        <span className="pill">{item.diskType} {item.diskSize}GB</span>
+                        <span className="pill">{item.totalAmount.toFixed(2)} {item.currency}</span>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-slate-500">The selected cart draft is empty. Add products from the flavor matrix.</p>
+                )}
+              </div>
+
+              <button className="btn btn-primary mt-5 w-full" disabled={publishLoading || !calculatorItems.length || !selectedCartKey} onClick={() => void publishCalculator()} type="button">
+                {publishLoading ? "Publishing..." : "Publish calculator to selected cart"}
+              </button>
+
+              {publishResult ? (
+                <div className="result-strip mt-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-semibold">Latest publish</p>
+                    <span className={`status ${publishResult.response.ok ? "status-ok" : "status-fail"}`}>
+                      {publishResult.response.status}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm text-slate-600">
+                    Draft published into <code>{selectedCartKey}</code>.
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          </aside>
+
+          <section className="space-y-6">
+            <div className="card calculator-shell">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="eyebrow">Step 2</p>
@@ -1225,96 +1294,41 @@ export default function Home() {
               </div>
             </div>
           </section>
-
-          <aside className="space-y-6">
-            <div className="card sticky top-6">
-              <p className="eyebrow">Step 4</p>
-              <h2 className="mt-1 text-2xl font-semibold">Calculator cart</h2>
-              <p className="mt-2 text-sm text-slate-600">
-                Stage one or more ECS products here, then publish the full calculator into the selected Huawei cart.
-              </p>
-
-              <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                <div className="metric-card">
-                  <p className="metric-label">Items</p>
-                  <p className="metric-value">{calculatorItems.length}</p>
-                </div>
-                <div className="metric-card">
-                  <p className="metric-label">Total</p>
-                  <p className="metric-value">{stagedTotal.toFixed(2)}</p>
-                </div>
-              </div>
-
-              <div className="mt-5 space-y-3">
-                {calculatorItems.length ? (
-                  calculatorItems.map((item) => (
-                    <div key={item.id} className="result-strip">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="font-semibold text-slate-900">{item.title}</p>
-                          <p className="mt-1 text-sm text-slate-600">
-                            {item.flavorCode} / {item.quantity}x / {item.hours}h
-                          </p>
-                        </div>
-                        <button className="text-sm font-semibold text-slate-500" onClick={() => removeItem(item.id)} type="button">
-                          Remove
-                        </button>
-                      </div>
-                      <p className="mt-2 text-sm text-slate-600">{item.description}</p>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <span className="pill">{item.region}</span>
-                        <span className="pill">{item.diskType} {item.diskSize}GB</span>
-                        <span className="pill">{item.totalAmount.toFixed(2)} {item.currency}</span>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-slate-500">Estimate a flavor and add it to the calculator to start building the cart.</p>
-                )}
-              </div>
-
-              <button className="btn btn-primary mt-5 w-full" disabled={publishLoading || !calculatorItems.length || !selectedCartKey} onClick={() => void publishCalculator()} type="button">
-                {publishLoading ? "Publishing..." : "Publish calculator to selected cart"}
-              </button>
-
-              {publishResult ? (
-                <div className="result-strip mt-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="font-semibold">Latest publish</p>
-                    <span className={`status ${publishResult.response.ok ? "status-ok" : "status-fail"}`}>
-                      {publishResult.response.status}
-                    </span>
-                  </div>
-                  <p className="mt-2 text-sm text-slate-600">
-                    The current calculator contents were written into cart <code>{selectedCartKey}</code>.
-                  </p>
-                </div>
-              ) : null}
-            </div>
-          </aside>
         </div>
 
         <section className="card">
-          <p className="eyebrow">Debug</p>
-          <h2 className="mt-1 text-2xl font-semibold">Underlying API responses</h2>
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <details className="debug-panel">
-              <summary>Catalog response</summary>
-              <pre className="code-block mt-3">{catalogResult ? pretty(catalogResult.response.body) : "Load flavors first."}</pre>
-            </details>
-            <details className="debug-panel">
-              <summary>Price response</summary>
-              <pre className="code-block mt-3">{estimateResult ? pretty(estimateResult.response.body) : "Estimate first."}</pre>
-            </details>
-            <details className="debug-panel">
-              <summary>Publish response</summary>
-              <pre className="code-block mt-3">{publishResult ? pretty(publishResult.response.body) : "Publish the calculator first."}</pre>
-            </details>
-            <details className="debug-panel">
-              <summary>Current calculator payload</summary>
-              <pre className="code-block mt-3">{calculatorItems.length ? pretty(calculatorItems.map((item) => item.payload)) : "Add items to the calculator first."}</pre>
-            </details>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="eyebrow">Diagnostics</p>
+              <h2 className="mt-1 text-2xl font-semibold">Developer panel</h2>
+            </div>
+            <button className="btn btn-secondary" onClick={() => setDebugOpen((open) => !open)} type="button">
+              {debugOpen ? "Hide debug" : "Show debug"}
+            </button>
           </div>
+
+          {debugOpen ? (
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <details className="debug-panel">
+                <summary>Catalog response</summary>
+                <pre className="code-block mt-3">{catalogResult ? pretty(catalogResult.response.body) : "Load flavors first."}</pre>
+              </details>
+              <details className="debug-panel">
+                <summary>Price response</summary>
+                <pre className="code-block mt-3">{estimateResult ? pretty(estimateResult.response.body) : "Estimate first."}</pre>
+              </details>
+              <details className="debug-panel">
+                <summary>Publish response</summary>
+                <pre className="code-block mt-3">{publishResult ? pretty(publishResult.response.body) : "Publish the calculator first."}</pre>
+              </details>
+              <details className="debug-panel">
+                <summary>Current calculator payload</summary>
+                <pre className="code-block mt-3">{calculatorItems.length ? pretty(calculatorItems.map((item) => item.payload)) : "Add items to the calculator first."}</pre>
+              </details>
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-slate-500">Hidden by default to keep the calculator faster and cleaner.</p>
+          )}
         </section>
       </main>
     </div>
