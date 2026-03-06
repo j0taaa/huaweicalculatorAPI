@@ -136,6 +136,30 @@ function getCartList(body: unknown): CartSummary[] {
   return lists as CartSummary[];
 }
 
+function extractMinimalCookie(input: string): string {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  if (!trimmed.includes("=") && !trimmed.includes(";")) {
+    return `HWS_INTL_ID=${trimmed}`;
+  }
+
+  if (trimmed.startsWith("HWS_INTL_ID=") && !trimmed.includes(";")) {
+    return trimmed;
+  }
+
+  const parts = trimmed.split(/;\s*/);
+  for (const part of parts) {
+    if (part.startsWith("HWS_INTL_ID=")) {
+      return part;
+    }
+  }
+
+  return trimmed;
+}
+
 export default function Home() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(true);
@@ -254,6 +278,8 @@ export default function Home() {
     window.localStorage.setItem("hwc-csrf", csrf);
   }, [cookie, csrf, sessionReady]);
 
+  const normalizedCookie = extractMinimalCookie(cookie);
+
   async function replayOne(
     id: string,
     options?: {
@@ -268,7 +294,7 @@ export default function Home() {
         id,
         url: options?.url,
         bodyRaw: options?.bodyRaw,
-        cookie: cookie.trim() || undefined,
+        cookie: normalizedCookie || undefined,
         csrf: csrf.trim() || undefined,
         useCapturedAuth: true,
       }),
@@ -471,13 +497,13 @@ export default function Home() {
           </div>
 
           <label className="label mt-4" htmlFor="session-cookie">
-            Cookie
+            Cookie or HWS_INTL_ID
           </label>
           <textarea
             className="field h-32"
             id="session-cookie"
             onChange={(event) => setCookie(event.target.value)}
-            placeholder="Paste one cookie string here and every API will use it."
+            placeholder="Paste the full cookie string, HWS_INTL_ID=..., or only the HWS_INTL_ID value."
             value={cookie}
           />
 
@@ -493,9 +519,16 @@ export default function Home() {
           />
 
           <p className="mt-3 text-xs text-slate-500">
-            If these are empty, the app falls back to the captured session inside <code>postmanLog.json</code>.
-            Cart actions may still require a fresh live cookie if Huawei invalidated the captured one.
+            The app auto-reduces this to the minimal cookie needed for cart APIs: <code>HWS_INTL_ID=...</code>.
+            If empty, it falls back to the captured session inside <code>postmanLog.json</code>.
           </p>
+
+          {normalizedCookie ? (
+            <div className="result-strip mt-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Using</p>
+              <p className="mt-1 break-all font-mono text-xs text-slate-700">{normalizedCookie}</p>
+            </div>
+          ) : null}
         </aside>
       ) : null}
 

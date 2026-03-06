@@ -59,7 +59,8 @@ docker run --rm -p 3000:3000 huaweicalculatorapi:latest
 
 ## UI behavior
 
-- Shared cookie/CSRF session panel in the corner, applied to every action.
+- Shared session panel in the corner, applied to every action.
+- Accepts a full cookie string, `HWS_INTL_ID=...`, or only the `HWS_INTL_ID` value and auto-normalizes it.
 - Create cart form with a single name field.
 - Cart list browser with selectable cart keys.
 - "Write sample config" action to push the captured ECS draft into a chosen cart.
