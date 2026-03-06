@@ -94,6 +94,7 @@ async function loadSqliteDatabaseConstructor(): Promise<SqliteDatabaseConstructo
 function initializeSchema(db: SqliteDatabase) {
   db.exec(`
     PRAGMA journal_mode = WAL;
+    PRAGMA busy_timeout = 10000;
     PRAGMA foreign_keys = ON;
 
     CREATE TABLE IF NOT EXISTS app_meta (
