@@ -64,6 +64,7 @@ docker run --rm -p 3000:3000 huaweicalculatorapi:latest
 - Left sidebar for cart creation, cart selection, live share-cart contents, and the pending publish queue.
 - Cart list sorted by most recent update first, with pagination in the sidebar.
 - Selected carts are resolved through the public `share/detail` endpoint and cached in the UI for faster switching.
+- Live cart items can be edited or deleted in place, and draft items can also be edited before publishing.
 - Browse and search ECS flavors collected from the product catalog API.
 - Filter the flavor matrix by minimum vCPU and RAM, and sort it by base price.
 - Paginated flavor matrix so large catalogs stay responsive.

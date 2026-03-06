@@ -102,15 +102,19 @@ type ShareCartDetail = {
 
 type RemoteCartItem = {
   id: string;
+  index: number;
   title: string;
   description: string;
   region: string;
   quantity: number;
   hours: number;
+  diskType: string;
+  diskSize: number;
   diskLabel: string;
   flavorCode: string;
   totalAmount: number;
   originalAmount: number;
+  payload: CalculatorCartItemPayload;
 };
 
 type ProductFlavor = {
@@ -222,6 +226,16 @@ type CalculatorItem = {
   originalAmount: number;
   payload: CalculatorCartItemPayload;
 };
+
+type EditorTarget =
+  | {
+      kind: "draft";
+      id: string;
+    }
+  | {
+      kind: "remote";
+      id: string;
+    };
 
 function pretty(value: unknown): string {
   if (typeof value === "string") {
@@ -392,17 +406,46 @@ function getRemoteCartItems(detail: ShareCartDetail | null): RemoteCartItem[] {
 
     return {
       id: `${flavorCode}-${index}`,
+      index,
       title,
       description: descriptionParts.join(" / ") || "Elastic Cloud Server",
       region: selectedProduct.region?.trim() || "Unknown region",
       quantity: selectedProduct.purchaseNum?.measureValue ?? (typeof vmInfo.productNum === "number" ? vmInfo.productNum : 1),
       hours: selectedProduct.purchaseTime?.measureValue ?? (typeof vmInfo.usageValue === "number" ? vmInfo.usageValue : 744),
+      diskType,
+      diskSize,
       diskLabel: diskSize > 0 ? `${diskType} ${diskSize}GB` : diskType,
       flavorCode,
       totalAmount: selectedProduct.amount ?? 0,
       originalAmount: selectedProduct.originalAmount ?? selectedProduct.amount ?? 0,
+      payload: cloneJson(item as CalculatorCartItemPayload),
     };
   });
+}
+
+function getPayloadAmount(item: CalculatorCartItemPayload): number {
+  const selectedProduct = item.selectedProduct as { amount?: unknown } | undefined;
+  return typeof selectedProduct?.amount === "number" ? selectedProduct.amount : 0;
+}
+
+function getPayloadOriginalAmount(item: CalculatorCartItemPayload): number {
+  const selectedProduct = item.selectedProduct as { originalAmount?: unknown; amount?: unknown } | undefined;
+  if (typeof selectedProduct?.originalAmount === "number") {
+    return selectedProduct.originalAmount;
+  }
+
+  return typeof selectedProduct?.amount === "number" ? selectedProduct.amount : 0;
+}
+
+function buildCartTotalPrice(items: CalculatorCartItemPayload[]) {
+  const amount = items.reduce((sum, item) => sum + getPayloadAmount(item), 0);
+  const originalAmount = items.reduce((sum, item) => sum + getPayloadOriginalAmount(item), 0);
+
+  return {
+    amount: Number(amount.toFixed(5)),
+    discountAmount: 0,
+    originalAmount: Number(originalAmount.toFixed(5)),
+  };
 }
 
 function buildBuyUrl(
@@ -628,6 +671,7 @@ export default function Home() {
   const [calculatorItems, setCalculatorItems] = useState<CalculatorItem[]>([]);
   const [publishLoading, setPublishLoading] = useState(false);
   const [publishResult, setPublishResult] = useState<ReplayResult | null>(null);
+  const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
   const [debugOpen, setDebugOpen] = useState(false);
 
   useEffect(() => {
@@ -727,6 +771,8 @@ export default function Home() {
   const currentCartDetail = selectedCartKey ? cartDetailCache[selectedCartKey] ?? null : null;
   const remoteCartItems = useMemo(() => getRemoteCartItems(currentCartDetail), [currentCartDetail]);
   const remoteCartTotal = currentCartDetail?.totalPrice?.amount ?? remoteCartItems.reduce((sum, item) => sum + item.totalAmount, 0);
+  const editingDraftItem = editorTarget?.kind === "draft" ? calculatorItems.find((item) => item.id === editorTarget.id) ?? null : null;
+  const editingRemoteItem = editorTarget?.kind === "remote" ? remoteCartItems.find((item) => item.id === editorTarget.id) ?? null : null;
   const cartsPerPage = 6;
   const flavorsPerPage = 12;
   const totalCartPages = Math.max(1, Math.ceil(cartsSorted.length / cartsPerPage));
@@ -864,6 +910,96 @@ export default function Home() {
     void loadCartDetail(deferredSelectedCartKey, false);
   }, [deferredSelectedCartKey, loadCartDetail]);
 
+  useEffect(() => {
+    setEditorTarget((current) => {
+      if (!current) {
+        return null;
+      }
+
+      if (current.kind === "remote" && !remoteCartItems.some((item) => item.id === current.id)) {
+        return null;
+      }
+
+      if (current.kind === "draft" && !calculatorItems.some((item) => item.id === current.id)) {
+        return null;
+      }
+
+      return current;
+    });
+  }, [calculatorItems, remoteCartItems]);
+
+  async function loadCatalogForRegion(region: string, preferredFlavorCode?: string) {
+    const template = findTemplate(templates, "get-product-options-and-info");
+    if (!template) {
+      setAppError("Catalog template is missing");
+      return [] as ProductFlavor[];
+    }
+
+    setCatalogLoading(true);
+    setAppError("");
+
+    try {
+      const nextRegion = region.trim() || "ap-southeast-3";
+      setCatalogRegion(nextRegion);
+
+      const url = new URL(template.url);
+      url.searchParams.set("region", nextRegion);
+      const result = await replayOne("get-product-options-and-info", {
+        url: url.toString(),
+      });
+      setCatalogResult(result);
+
+      const nextFlavors = getCatalogFlavors(result.response.body);
+      const preferred = preferredFlavorCode
+        ? nextFlavors.find((flavor) => flavor.resourceSpecCode === preferredFlavorCode)
+        : nextFlavors[0];
+
+      if (preferred) {
+        setSelectedFlavorCode(preferred.resourceSpecCode);
+        setConfigTitle((current) => current || preferred.resourceSpecCode);
+      }
+
+      return nextFlavors;
+    } catch (error) {
+      setAppError(error instanceof Error ? error.message : "Failed to load catalog");
+      return [] as ProductFlavor[];
+    } finally {
+      setCatalogLoading(false);
+    }
+  }
+
+  function populateEditorFromDraftItem(item: CalculatorItem) {
+    setEditorTarget({ kind: "draft", id: item.id });
+    setConfigRegion(item.region);
+    setConfigQuantity(String(item.quantity));
+    setConfigHours(String(item.hours));
+    setConfigDiskType(item.diskType);
+    setConfigDiskSize(String(item.diskSize));
+    setConfigTitle(item.title);
+    setConfigDescription(item.description);
+    setSelectedFlavorCode(item.flavorCode);
+    setEstimateResult(null);
+    void loadCatalogForRegion(item.region, item.flavorCode);
+  }
+
+  function populateEditorFromRemoteItem(item: RemoteCartItem) {
+    setEditorTarget({ kind: "remote", id: item.id });
+    setConfigRegion(item.region);
+    setConfigQuantity(String(item.quantity));
+    setConfigHours(String(item.hours));
+    setConfigDiskType(item.diskType);
+    setConfigDiskSize(String(item.diskSize));
+    setConfigTitle(item.title);
+    setConfigDescription(item.description);
+    setSelectedFlavorCode(item.flavorCode);
+    setEstimateResult(null);
+    void loadCatalogForRegion(item.region, item.flavorCode);
+  }
+
+  function cancelEditor() {
+    setEditorTarget(null);
+  }
+
   async function createCart() {
     const template = findTemplate(templates, "create-cart");
     if (!template || typeof template.bodyJson !== "object" || !template.bodyJson) {
@@ -907,33 +1043,7 @@ export default function Home() {
   }
 
   async function loadCatalog() {
-    const template = findTemplate(templates, "get-product-options-and-info");
-    if (!template) {
-      setAppError("Catalog template is missing");
-      return;
-    }
-
-    setCatalogLoading(true);
-    setAppError("");
-
-    try {
-      const url = new URL(template.url);
-      url.searchParams.set("region", catalogRegion.trim() || "ap-southeast-3");
-      const result = await replayOne("get-product-options-and-info", {
-        url: url.toString(),
-      });
-      setCatalogResult(result);
-
-      const nextFlavors = getCatalogFlavors(result.response.body);
-      if (nextFlavors[0]) {
-        setSelectedFlavorCode(nextFlavors[0].resourceSpecCode);
-        setConfigTitle(nextFlavors[0].resourceSpecCode);
-      }
-    } catch (error) {
-      setAppError(error instanceof Error ? error.message : "Failed to load catalog");
-    } finally {
-      setCatalogLoading(false);
-    }
+    await loadCatalogForRegion(catalogRegion);
   }
 
   async function estimatePrice() {
@@ -1007,7 +1117,7 @@ export default function Home() {
     });
 
     const item: CalculatorItem = {
-      id: `${Date.now()}-${selectedFlavor.resourceSpecCode}`,
+      id: editingDraftItem?.id ?? `${Date.now()}-${selectedFlavor.resourceSpecCode}`,
       title: configTitle.trim() || selectedFlavor.resourceSpecCode,
       description: configDescription.trim() || "Generated from the custom calculator",
       region: configRegion.trim() || "sa-brazil-1",
@@ -1022,28 +1132,30 @@ export default function Home() {
       payload,
     };
 
-    setCalculatorItems((current) => [...current, item]);
+    setCalculatorItems((current) => {
+      if (!editingDraftItem) {
+        return [...current, item];
+      }
+
+      return current.map((currentItem) => (currentItem.id === editingDraftItem.id ? item : currentItem));
+    });
+    setEditorTarget(null);
   }
 
   function removeItem(itemId: string) {
     setCalculatorItems((current) => current.filter((item) => item.id !== itemId));
   }
 
-  async function publishCalculator() {
+  async function updateLiveCartItems(nextItems: CalculatorCartItemPayload[]) {
     const template = findTemplate(templates, "edit-cart");
     if (!template || typeof template.bodyJson !== "object" || !template.bodyJson) {
       setAppError("Edit cart template is missing");
-      return;
+      return null;
     }
 
     if (!selectedCartKey.trim()) {
       setAppError("Select or create a Huawei cart first");
-      return;
-    }
-
-    if (!calculatorItems.length) {
-      setAppError("Add at least one product to the calculator before publishing");
-      return;
+      return null;
     }
 
     setPublishLoading(true);
@@ -1051,16 +1163,12 @@ export default function Home() {
 
     try {
       const base = cloneJson(template.bodyJson as EditCartPayload);
-      const total = calculatorItems.reduce((sum, item) => sum + item.totalAmount, 0);
-      const original = calculatorItems.reduce((sum, item) => sum + item.originalAmount, 0);
+      const totalPrice = buildCartTotalPrice(nextItems);
 
-      base.name = selectedCartName.trim() || "Calculator cart";
-      base.cartListData = calculatorItems.map((item) => cloneJson(item.payload));
-      base.totalPrice = {
-        amount: Number(total.toFixed(5)),
-        discountAmount: 0,
-        originalAmount: Number(original.toFixed(5)),
-      };
+      base.name = selectedCartName.trim() || currentCartDetail?.name || "Calculator cart";
+      base.billingMode = currentCartDetail?.billingMode || base.billingMode;
+      base.cartListData = nextItems.map((item) => cloneJson(item));
+      base.totalPrice = totalPrice;
 
       const url = new URL(template.url);
       url.searchParams.set("key", selectedCartKey.trim());
@@ -1071,13 +1179,102 @@ export default function Home() {
       });
 
       setPublishResult(result);
+      setCartDetailCache((current) => ({
+        ...current,
+        [selectedCartKey.trim()]: {
+          billingMode: base.billingMode,
+          cartListData: base.cartListData,
+          name: base.name,
+          totalPrice: base.totalPrice,
+        },
+      }));
       await refreshCarts();
       await loadCartDetail(selectedCartKey.trim(), true);
+      return result;
     } catch (error) {
-      setAppError(error instanceof Error ? error.message : "Failed to publish calculator");
+      setAppError(error instanceof Error ? error.message : "Failed to update live cart");
+      return null;
     } finally {
       setPublishLoading(false);
     }
+  }
+
+  async function deleteRemoteItem(itemId: string) {
+    if (!currentCartDetail?.cartListData?.length) {
+      setAppError("Load the selected cart before deleting an item");
+      return;
+    }
+
+    const targetItem = remoteCartItems.find((item) => item.id === itemId);
+    if (!targetItem) {
+      setAppError("The selected live cart item could not be found");
+      return;
+    }
+
+    const nextItems = currentCartDetail.cartListData
+      .filter((_, index) => index !== targetItem.index)
+      .map((item) => cloneJson(item as CalculatorCartItemPayload));
+
+    const result = await updateLiveCartItems(nextItems);
+    if (result && editorTarget?.kind === "remote" && editorTarget.id === itemId) {
+      setEditorTarget(null);
+    }
+  }
+
+  async function saveRemoteItemChanges() {
+    if (!editingRemoteItem) {
+      setAppError("Choose a live cart item to edit first");
+      return;
+    }
+
+    if (!currentCartDetail?.cartListData?.length) {
+      setAppError("Load the selected cart before editing an item");
+      return;
+    }
+
+    if (!selectedFlavor || !estimateBody) {
+      setAppError("Estimate the updated price before saving the live cart item");
+      return;
+    }
+
+    const quantity = Number.parseInt(configQuantity, 10) || 1;
+    const hours = Number.parseInt(configHours, 10) || 744;
+    const diskSize = Number.parseInt(configDiskSize, 10) || 40;
+
+    const nextPayload = buildCalculatorItemPayload(editingRemoteItem.payload, selectedFlavor, estimateBody, {
+      region: configRegion.trim() || editingRemoteItem.region,
+      quantity,
+      hours,
+      diskType: configDiskType.trim() || editingRemoteItem.diskType,
+      diskSize,
+      title: configTitle.trim() || selectedFlavor.resourceSpecCode,
+      description: configDescription.trim() || editingRemoteItem.description,
+    });
+
+    const nextItems = currentCartDetail.cartListData.map((item, index) => (
+      index === editingRemoteItem.index
+        ? nextPayload
+        : cloneJson(item as CalculatorCartItemPayload)
+    ));
+
+    const result = await updateLiveCartItems(nextItems);
+    if (result) {
+      setEditorTarget(null);
+    }
+  }
+
+  async function publishCalculator() {
+    if (!selectedCartKey.trim()) {
+      setAppError("Select or create a Huawei cart first");
+      return;
+    }
+
+    if (!calculatorItems.length) {
+      setAppError("Add at least one product to the calculator before publishing");
+      return;
+    }
+
+    await updateLiveCartItems(calculatorItems.map((item) => cloneJson(item.payload)));
   }
 
   return (
@@ -1294,7 +1491,15 @@ export default function Home() {
                           <p className="font-semibold text-slate-900">{item.title}</p>
                           <p className="mt-1 text-sm text-slate-600">{item.flavorCode}</p>
                         </div>
-                        <span className="pill">{item.totalAmount.toFixed(2)}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="pill">{item.totalAmount.toFixed(2)}</span>
+                          <button className="btn btn-secondary btn-small" disabled={publishLoading} onClick={() => populateEditorFromRemoteItem(item)} type="button">
+                            Edit
+                          </button>
+                          <button className="btn btn-danger btn-small" disabled={publishLoading} onClick={() => void deleteRemoteItem(item.id)} type="button">
+                            Delete
+                          </button>
+                        </div>
                       </div>
                       <p className="mt-2 text-sm text-slate-600">{item.description}</p>
                       <div className="mt-3 flex flex-wrap gap-2">
@@ -1342,9 +1547,14 @@ export default function Home() {
                           <p className="font-semibold text-slate-900">{item.title}</p>
                           <p className="mt-1 text-sm text-slate-600">{item.flavorCode}</p>
                         </div>
-                        <button className="text-sm font-semibold text-slate-500" onClick={() => removeItem(item.id)} type="button">
-                          Remove
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button className="btn btn-secondary btn-small" onClick={() => populateEditorFromDraftItem(item)} type="button">
+                            Edit
+                          </button>
+                          <button className="btn btn-danger btn-small" onClick={() => removeItem(item.id)} type="button">
+                            Delete
+                          </button>
+                        </div>
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <span className="pill">{item.quantity}x</span>
@@ -1522,6 +1732,24 @@ export default function Home() {
               <p className="eyebrow">Step 3</p>
               <h2 className="mt-1 text-2xl font-semibold">Configure and price the selected product</h2>
 
+              {editorTarget ? (
+                <div className="result-strip mt-4 flex flex-wrap items-center justify-between gap-3 border-sky-200 bg-sky-50">
+                  <div>
+                    <p className="text-sm font-semibold text-sky-900">
+                      {editorTarget.kind === "remote" ? "Editing live cart item" : "Editing draft item"}
+                    </p>
+                    <p className="mt-1 text-sm text-sky-800">
+                      {editorTarget.kind === "remote"
+                        ? "Estimate the updated configuration, then save changes directly to the selected Huawei cart."
+                        : "Estimate the updated configuration, then save it back into the draft queue."}
+                    </p>
+                  </div>
+                  <button className="btn btn-secondary btn-small" onClick={cancelEditor} type="button">
+                    Cancel edit
+                  </button>
+                </div>
+              ) : null}
+
               <div className="mt-5 grid gap-4 lg:grid-cols-[0.95fr_1.05fr]">
                 <div className="soft-panel">
                   <p className="section-title">Configuration</p>
@@ -1589,8 +1817,13 @@ export default function Home() {
                       {estimateLoading ? "Estimating..." : "Estimate ECS monthly price"}
                     </button>
                     <button className="btn btn-secondary" disabled={!estimateBody} onClick={addEstimatedItem} type="button">
-                      Add product to calculator
+                      {editorTarget?.kind === "draft" ? "Save draft changes" : "Add product to draft"}
                     </button>
+                    {editorTarget?.kind === "remote" ? (
+                      <button className="btn btn-secondary" disabled={!estimateBody || publishLoading} onClick={() => void saveRemoteItemChanges()} type="button">
+                        {publishLoading ? "Saving..." : "Save changes to live cart"}
+                      </button>
+                    ) : null}
                   </div>
 
                   {estimateBody ? (

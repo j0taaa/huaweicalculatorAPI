@@ -259,6 +259,16 @@ pre,
   font-size: 0.82rem;
 }
 
+.btn-danger {
+  border: 1px solid rgba(220, 38, 38, 0.18);
+  background: rgba(254, 242, 242, 0.95);
+  color: #b91c1c;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: rgba(254, 226, 226, 0.98);
+}
+
 .btn-primary {
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   color: white;
