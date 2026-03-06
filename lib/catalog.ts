@@ -143,18 +143,21 @@ export type PriceResponseBody = {
   }>;
 };
 
+export type CatalogPricingMode = "ONDEMAND" | "MONTHLY" | "YEARLY" | "RI";
+
+type CatalogPlan = {
+  billingMode?: string;
+  amount?: number;
+  originType?: string;
+  amountType?: string;
+};
+
 type CatalogPricedItem = {
   resourceSpecCode: string;
   amount?: number;
   productId?: string;
-  planList?: Array<{
-    billingMode?: string;
-    amount?: number;
-  }>;
-  bakPlanList?: Array<{
-    billingMode?: string;
-    amount?: number;
-  }>;
+  planList?: CatalogPlan[];
+  bakPlanList?: CatalogPlan[];
   inquiryResult?: {
     id?: string;
     productId?: string;
@@ -167,40 +170,81 @@ function getFlavorPlanCount(flavor: ProductFlavor): number {
   return (flavor.planList?.length ?? 0) + (flavor.bakPlanList?.length ?? 0);
 }
 
-function getCatalogItemBasePrice(item: CatalogPricedItem): number {
-  const pricedPlan = [...(item.planList ?? []), ...(item.bakPlanList ?? [])].find((plan) => (
-    typeof plan.amount === "number" && plan.billingMode === "ONDEMAND"
+function getCatalogPlans(item: CatalogPricedItem): CatalogPlan[] {
+  return [...(item.planList ?? []), ...(item.bakPlanList ?? [])];
+}
+
+function getLowestPlanAmount(plans: CatalogPlan[]): number {
+  const amounts = plans
+    .map((plan) => plan.amount)
+    .filter((amount): amount is number => typeof amount === "number" && Number.isFinite(amount));
+
+  return amounts.length ? Math.min(...amounts) : Number.POSITIVE_INFINITY;
+}
+
+function getCatalogItemBasePrice(item: CatalogPricedItem, pricingMode: CatalogPricingMode = "ONDEMAND"): number {
+  const matchingPlans = getCatalogPlans(item).filter((plan) => (
+    typeof plan.amount === "number" && plan.billingMode === pricingMode
   ));
-  if (typeof pricedPlan?.amount === "number") {
-    return pricedPlan.amount;
+
+  if (pricingMode === "RI") {
+    const preferredRiPrice = getLowestPlanAmount(matchingPlans.filter((plan) => (
+      plan.originType === "perEffectivePrice" || plan.amountType === "nodeData.perEffectivePrice"
+    )));
+    if (Number.isFinite(preferredRiPrice)) {
+      return preferredRiPrice;
+    }
+
+    const fallbackRiPrice = getLowestPlanAmount(matchingPlans.filter((plan) => (
+      plan.originType === "perPrice" || plan.amountType === "nodeData.perPrice"
+    )));
+    if (Number.isFinite(fallbackRiPrice)) {
+      return fallbackRiPrice;
+    }
+
+    const genericRiPrice = getLowestPlanAmount(matchingPlans);
+    if (Number.isFinite(genericRiPrice)) {
+      return genericRiPrice;
+    }
+  } else {
+    const matchedPrice = getLowestPlanAmount(matchingPlans);
+    if (Number.isFinite(matchedPrice)) {
+      return matchedPrice;
+    }
   }
 
-  if (typeof item.amount === "number") {
+  if (pricingMode === "ONDEMAND" && typeof item.amount === "number") {
     return item.amount;
   }
 
-  const fallbackPlan = [...(item.planList ?? []), ...(item.bakPlanList ?? [])].find((plan) => typeof plan.amount === "number");
-  if (typeof fallbackPlan?.amount === "number") {
-    return fallbackPlan.amount;
+  if (pricingMode === "ONDEMAND") {
+    const fallbackPlan = getCatalogPlans(item).find((plan) => typeof plan.amount === "number");
+    if (typeof fallbackPlan?.amount === "number") {
+      return fallbackPlan.amount;
+    }
   }
 
-  if (typeof item.inquiryResult?.perAmount === "number") {
+  if (pricingMode === "ONDEMAND" && typeof item.inquiryResult?.perAmount === "number") {
     return item.inquiryResult.perAmount;
   }
 
-  if (typeof item.inquiryResult?.amount === "number") {
+  if (pricingMode === "ONDEMAND" && typeof item.inquiryResult?.amount === "number") {
     return item.inquiryResult.amount;
   }
 
   return Number.POSITIVE_INFINITY;
 }
 
-export function getFlavorBasePrice(flavor: ProductFlavor): number {
-  return getCatalogItemBasePrice(flavor);
+export function getFlavorBasePrice(flavor: ProductFlavor, pricingMode: CatalogPricingMode = "ONDEMAND"): number {
+  return getCatalogItemBasePrice(flavor, pricingMode);
 }
 
-export function getDiskBasePrice(disk: ProductDisk): number {
-  return getCatalogItemBasePrice(disk);
+export function getDiskBasePrice(disk: ProductDisk, pricingMode: CatalogPricingMode = "ONDEMAND"): number {
+  return getCatalogItemBasePrice(disk, pricingMode);
+}
+
+export function getEffectiveDiskPricingMode(pricingMode: CatalogPricingMode): CatalogPricingMode {
+  return pricingMode === "RI" ? "ONDEMAND" : pricingMode;
 }
 
 function shouldPreferFlavor(candidate: ProductFlavor, current: ProductFlavor): boolean {
@@ -273,8 +317,9 @@ export function buildCatalogPriceEstimate(
     flavorCode: string;
     diskType: string;
     diskSize: number;
-    hours: number;
+    durationValue: number;
     quantity: number;
+    pricingMode: CatalogPricingMode;
   },
 ): PriceResponseBody | null {
   const flavor = getCatalogFlavors(body).find((item) => item.resourceSpecCode === config.flavorCode);
@@ -283,18 +328,18 @@ export function buildCatalogPriceEstimate(
     return null;
   }
 
-  const flavorRate = getFlavorBasePrice(flavor);
-  const diskRate = getDiskBasePrice(disk);
+  const flavorRate = getFlavorBasePrice(flavor, config.pricingMode);
+  const diskRate = getDiskBasePrice(disk, getEffectiveDiskPricingMode(config.pricingMode));
   if (!Number.isFinite(flavorRate) || !Number.isFinite(diskRate)) {
     return null;
   }
 
   const quantity = Math.max(1, config.quantity);
-  const hours = Math.max(1, config.hours);
+  const durationValue = Math.max(1, config.durationValue);
   const diskSize = Math.max(0, config.diskSize);
 
-  const flavorAmount = roundMoney(flavorRate * quantity * hours);
-  const diskAmount = roundMoney(diskRate * diskSize * quantity * hours);
+  const flavorAmount = roundMoney(flavorRate * quantity * durationValue);
+  const diskAmount = roundMoney(diskRate * diskSize * quantity * durationValue);
   const totalAmount = roundMoney(flavorAmount + diskAmount);
 
   return {

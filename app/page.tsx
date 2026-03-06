@@ -3,9 +3,11 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   buildCatalogPriceEstimate,
+  getEffectiveDiskPricingMode,
   getCatalogDisks,
   getCatalogFlavors,
   getFlavorBasePrice,
+  type CatalogPricingMode,
   type PriceResponseBody,
   type ProductDisk,
   type ProductFlavor,
@@ -110,6 +112,12 @@ type ShareCartItemPayload = {
   buyUrl?: string;
   rewriteValue?: {
     global_DESCRIPTION?: string;
+    global_PRICINGMODE?: string;
+    global_DISKPRICINGMODE?: string;
+    global_DURATIONUNIT?: string;
+    global_REGIONINFO?: {
+      chargeMode?: string;
+    };
   };
   selectedProduct?: {
     _customTitle?: string;
@@ -123,6 +131,11 @@ type ShareCartItemPayload = {
     purchaseTime?: {
       measureValue?: number;
     };
+    chargeMode?: string;
+    chargeModeName?: string;
+    calculatorPricingMode?: string;
+    calculatorDiskPricingMode?: string;
+    calculatorDurationUnit?: string;
     productAllInfos?: Array<Record<string, unknown>>;
   };
 };
@@ -146,6 +159,9 @@ type RemoteCartItem = {
   region: string;
   quantity: number;
   hours: number;
+  pricingMode: CatalogPricingMode;
+  diskPricingMode: CatalogPricingMode;
+  durationUnit: string;
   diskType: string;
   diskSize: number;
   diskLabel: string;
@@ -189,6 +205,9 @@ type CalculatorItem = {
   region: string;
   quantity: number;
   hours: number;
+  pricingMode: CatalogPricingMode;
+  diskPricingMode: CatalogPricingMode;
+  durationUnit: string;
   diskType: string;
   diskSize: number;
   flavorCode: string;
@@ -209,9 +228,96 @@ type EditorTarget =
     };
 
 const CONFIG_HOUR_OPTIONS = ["24", "168", "360", "720", "744"];
+const CONFIG_MONTH_OPTIONS = ["1", "3", "6", "12", "24", "36"];
+const CONFIG_YEAR_OPTIONS = ["1", "2", "3"];
 const CONFIG_QUANTITY_OPTIONS = ["1", "2", "3", "5", "10"];
 const DEFAULT_REGION = "sa-brazil-1";
 const DEFAULT_CATALOG_DISK_TYPE = "GPSSD";
+const DEFAULT_PRICING_MODE: CatalogPricingMode = "ONDEMAND";
+const PRICING_MODE_OPTIONS: Array<{ value: CatalogPricingMode; label: string }> = [
+  { value: "ONDEMAND", label: "On-demand" },
+  { value: "MONTHLY", label: "Monthly" },
+  { value: "YEARLY", label: "Yearly" },
+  { value: "RI", label: "RI" },
+];
+
+function isCatalogPricingMode(value: string): value is CatalogPricingMode {
+  return PRICING_MODE_OPTIONS.some((option) => option.value === value);
+}
+
+function getPricingModeLabel(pricingMode: CatalogPricingMode): string {
+  return PRICING_MODE_OPTIONS.find((option) => option.value === pricingMode)?.label ?? pricingMode;
+}
+
+function getPricingRateLabel(pricingMode: CatalogPricingMode): string {
+  switch (pricingMode) {
+    case "MONTHLY":
+      return "Base monthly price";
+    case "YEARLY":
+      return "Base yearly price";
+    case "RI":
+      return "RI effective hourly price";
+    default:
+      return "Base hourly price";
+  }
+}
+
+function getPricingDurationLabel(pricingMode: CatalogPricingMode): string {
+  switch (pricingMode) {
+    case "MONTHLY":
+      return "Months";
+    case "YEARLY":
+      return "Years";
+    default:
+      return "Hours";
+  }
+}
+
+function getPricingDurationUnit(pricingMode: CatalogPricingMode): string {
+  switch (pricingMode) {
+    case "MONTHLY":
+      return "month";
+    case "YEARLY":
+      return "year";
+    default:
+      return "hour";
+  }
+}
+
+function getPricingDurationOptions(pricingMode: CatalogPricingMode): string[] {
+  switch (pricingMode) {
+    case "MONTHLY":
+      return CONFIG_MONTH_OPTIONS;
+    case "YEARLY":
+      return CONFIG_YEAR_OPTIONS;
+    default:
+      return CONFIG_HOUR_OPTIONS;
+  }
+}
+
+function getDefaultDurationValue(pricingMode: CatalogPricingMode): string {
+  return getPricingDurationOptions(pricingMode)[0] ?? "1";
+}
+
+function formatDuration(pricingMode: CatalogPricingMode, value: number): string {
+  const unit = getPricingDurationUnit(pricingMode);
+  const suffix = value === 1 ? unit : `${unit}s`;
+  return `${value} ${suffix}`;
+}
+
+function getStoredPricingMode(item: ShareCartItemPayload): CatalogPricingMode {
+  const selectedProduct = item.selectedProduct ?? {};
+  const rewriteValue = item.rewriteValue ?? {};
+  const candidate = (
+    selectedProduct.calculatorPricingMode
+    ?? selectedProduct.chargeMode
+    ?? rewriteValue.global_PRICINGMODE
+    ?? rewriteValue.global_REGIONINFO?.chargeMode
+    ?? ""
+  ).trim();
+
+  return isCatalogPricingMode(candidate) ? candidate : DEFAULT_PRICING_MODE;
+}
 
 function withCurrentOption(options: string[], current: string): string[] {
   const trimmed = current.trim();
@@ -253,8 +359,9 @@ function buildCachedEstimateResult(
   flavorCode: string,
   diskType: string,
   diskSize: number,
-  hours: number,
+  durationValue: number,
   quantity: number,
+  pricingMode: CatalogPricingMode,
 ): ReplayResult {
   return {
     endpoint: {
@@ -270,8 +377,9 @@ function buildCachedEstimateResult(
         flavorCode,
         diskType,
         diskSize,
-        hours,
+        durationValue,
         quantity,
+        pricingMode,
       }),
       useCapturedAuth: false,
     },
@@ -418,6 +526,9 @@ function getRemoteCartItems(detail: ShareCartDetail | null): RemoteCartItem[] {
     const productInfos = Array.isArray(selectedProduct.productAllInfos) ? selectedProduct.productAllInfos : [];
     const vmInfo = (productInfos[0] ?? {}) as Record<string, unknown>;
     const diskInfo = (productInfos[2] ?? {}) as Record<string, unknown>;
+    const pricingMode = getStoredPricingMode(item);
+    const durationUnit = selectedProduct.calculatorDurationUnit?.trim() || getPricingDurationUnit(pricingMode);
+    const storedDiskPricingMode = selectedProduct.calculatorDiskPricingMode?.trim() ?? "";
     const flavorCode = typeof vmInfo.resourceSpecCode === "string" ? vmInfo.resourceSpecCode : "Unknown flavor";
     const diskType = typeof diskInfo.resourceSpecCode === "string" ? diskInfo.resourceSpecCode : "Disk";
     const diskSize = typeof diskInfo.resourceSize === "number" ? diskInfo.resourceSize : 0;
@@ -438,6 +549,11 @@ function getRemoteCartItems(detail: ShareCartDetail | null): RemoteCartItem[] {
       region: selectedProduct.region?.trim() || "Unknown region",
       quantity: selectedProduct.purchaseNum?.measureValue ?? (typeof vmInfo.productNum === "number" ? vmInfo.productNum : 1),
       hours: selectedProduct.purchaseTime?.measureValue ?? (typeof vmInfo.usageValue === "number" ? vmInfo.usageValue : 744),
+      pricingMode,
+      diskPricingMode: isCatalogPricingMode(storedDiskPricingMode)
+        ? storedDiskPricingMode
+        : getEffectiveDiskPricingMode(pricingMode),
+      durationUnit,
       diskType,
       diskSize,
       diskLabel: diskSize > 0 ? `${diskType} ${diskSize}GB` : diskType,
@@ -497,7 +613,8 @@ function buildCalculatorItemPayload(
   config: {
     region: string;
     quantity: number;
-    hours: number;
+    durationValue: number;
+    pricingMode: CatalogPricingMode;
     diskType: string;
     diskSize: number;
     title: string;
@@ -513,14 +630,19 @@ function buildCalculatorItemPayload(
   const diskInfo = productAllInfos[2] ?? {};
   const vmRating = priceResponse.productRatingResult?.[0];
   const diskRating = priceResponse.productRatingResult?.[1];
+  const diskPricingMode = getEffectiveDiskPricingMode(config.pricingMode);
+  const durationUnit = getPricingDurationUnit(config.pricingMode);
 
   payload.buyUrl = buildBuyUrl(payload.buyUrl ?? "", config.region, flavor, config.diskType, config.diskSize, config.quantity);
 
   rewriteValue.global_DESCRIPTION = config.description;
+  rewriteValue.global_PRICINGMODE = config.pricingMode;
+  rewriteValue.global_DISKPRICINGMODE = diskPricingMode;
+  rewriteValue.global_DURATIONUNIT = durationUnit;
   rewriteValue.global_REGIONINFO = {
     region: config.region,
     locationType: "commonAZ",
-    chargeMode: "ONDEMAND",
+    chargeMode: config.pricingMode,
   };
 
   const templateRender = (rewriteValue.template_RENDER as Record<string, unknown>) ?? {};
@@ -550,7 +672,7 @@ function buildCalculatorItemPayload(
   rewriteValue.global_ONDEMANDTIME = {
     UNSET_Stepper_0: {
       measureId: 4,
-      measureValue: config.hours,
+      measureValue: config.durationValue,
       measureNameBeforeTrans: "",
       measurePluralNameBeforeTrans: "",
       transRate: "",
@@ -573,11 +695,16 @@ function buildCalculatorItemPayload(
   selectedProduct.timeTag = Date.now();
   selectedProduct.description = config.description;
   selectedProduct._customTitle = config.title;
+  selectedProduct.chargeMode = config.pricingMode;
+  selectedProduct.chargeModeName = config.pricingMode;
+  selectedProduct.calculatorPricingMode = config.pricingMode;
+  selectedProduct.calculatorDiskPricingMode = diskPricingMode;
+  selectedProduct.calculatorDurationUnit = durationUnit;
   selectedProduct.amount = priceResponse.amount;
   selectedProduct.discountAmount = priceResponse.discountAmount;
   selectedProduct.originalAmount = priceResponse.originalAmount;
   selectedProduct.purchaseTime = {
-    measureValue: config.hours,
+    measureValue: config.durationValue,
     measureId: 4,
     measureNameBeforeTrans: "",
     measurePluralNameBeforeTrans: "",
@@ -598,7 +725,8 @@ function buildCalculatorItemPayload(
     productSpecSysDesc: flavor.productSpecSysDesc ?? vmInfo.productSpecSysDesc,
     productNum: config.quantity,
     selfProductNum: config.quantity,
-    usageValue: config.hours,
+    billingMode: config.pricingMode,
+    usageValue: config.durationValue,
     inquiryResult: {
       ...(vmInfo.inquiryResult as Record<string, unknown>),
       id: vmRating?.id ?? (vmInfo.inquiryResult as Record<string, unknown>)?.id,
@@ -617,8 +745,8 @@ function buildCalculatorItemPayload(
 
   productAllInfos[1] = {
     ...imageInfo,
-    productNum: config.hours,
-    durationNum: config.hours,
+    productNum: config.durationValue,
+    durationNum: config.durationValue,
   };
 
   productAllInfos[2] = {
@@ -628,7 +756,8 @@ function buildCalculatorItemPayload(
     resourceSize: config.diskSize,
     productNum: config.quantity,
     selfProductNum: config.quantity,
-    usageValue: config.hours,
+    billingMode: diskPricingMode,
+    usageValue: config.durationValue,
     inquiryResult: {
       ...(diskInfo.inquiryResult as Record<string, unknown>),
       id: diskRating?.id ?? (diskInfo.inquiryResult as Record<string, unknown>)?.id,
@@ -682,6 +811,7 @@ export default function Home() {
   const [catalogMinVcpu, setCatalogMinVcpu] = useState("0");
   const [catalogMinRam, setCatalogMinRam] = useState("0");
   const [catalogSort, setCatalogSort] = useState("price-asc");
+  const [catalogPricingMode, setCatalogPricingMode] = useState<CatalogPricingMode>(DEFAULT_PRICING_MODE);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogResult, setCatalogResult] = useState<CatalogCacheResult | null>(null);
   const [selectedFlavorCode, setSelectedFlavorCode] = useState("");
@@ -796,12 +926,14 @@ export default function Home() {
       .filter((flavor) => getFlavorCpuCount(flavor) >= (Number.parseInt(catalogMinVcpu, 10) || 0))
       .filter((flavor) => getFlavorMemoryGb(flavor) >= (Number.parseInt(catalogMinRam, 10) || 0))
       .sort((left, right) => {
-        const leftPrice = getFlavorBasePrice(left);
-        const rightPrice = getFlavorBasePrice(right);
+        const leftPrice = getFlavorBasePrice(left, catalogPricingMode);
+        const rightPrice = getFlavorBasePrice(right, catalogPricingMode);
         return catalogSort === "price-desc" ? rightPrice - leftPrice : leftPrice - rightPrice;
       });
-  }, [catalogMinRam, catalogMinVcpu, catalogSort, deferredCatalogSearch, flavors]);
+  }, [catalogMinRam, catalogMinVcpu, catalogPricingMode, catalogSort, deferredCatalogSearch, flavors]);
   const selectedFlavor = getSelectedFlavor(flavors, selectedFlavorCode);
+  const selectedFlavorPrice = selectedFlavor ? getFlavorBasePrice(selectedFlavor, catalogPricingMode) : Number.POSITIVE_INFINITY;
+  const selectedFlavorSupportsPricingMode = Number.isFinite(selectedFlavorPrice);
   const estimateBody = estimateResult?.response.body as PriceResponseBody | undefined;
   const stagedTotal = calculatorItems.reduce((sum, item) => sum + item.totalAmount, 0);
   const currentCartDetail = selectedCartKey ? cartDetailCache[selectedCartKey] ?? null : null;
@@ -822,8 +954,17 @@ export default function Home() {
       configDiskType,
     );
   }, [catalogDisks, configDiskType]);
-  const configHourOptions = withCurrentOption(CONFIG_HOUR_OPTIONS, configHours);
+  const configHourOptions = withCurrentOption(getPricingDurationOptions(catalogPricingMode), configHours);
   const configQuantityOptions = withCurrentOption(CONFIG_QUANTITY_OPTIONS, configQuantity);
+
+  useEffect(() => {
+    setConfigHours((current) => (
+      getPricingDurationOptions(catalogPricingMode).includes(current)
+        ? current
+        : getDefaultDurationValue(catalogPricingMode)
+    ));
+    setEstimateResult(null);
+  }, [catalogPricingMode]);
 
   useEffect(() => {
     setCartPage(1);
@@ -1018,6 +1159,7 @@ export default function Home() {
 
   function populateEditorFromDraftItem(item: CalculatorItem) {
     setEditorTarget({ kind: "draft", id: item.id });
+    setCatalogPricingMode(item.pricingMode);
     setConfigQuantity(String(item.quantity));
     setConfigHours(String(item.hours));
     setConfigDiskType(item.diskType);
@@ -1031,6 +1173,7 @@ export default function Home() {
 
   function populateEditorFromRemoteItem(item: RemoteCartItem) {
     setEditorTarget({ kind: "remote", id: item.id });
+    setCatalogPricingMode(item.pricingMode);
     setConfigQuantity(String(item.quantity));
     setConfigHours(String(item.hours));
     setConfigDiskType(item.diskType);
@@ -1098,12 +1241,17 @@ export default function Home() {
       return;
     }
 
+    if (!selectedFlavorSupportsPricingMode) {
+      setAppError(`${selectedFlavor.resourceSpecCode} does not expose ${getPricingModeLabel(catalogPricingMode)} pricing in the cached Huawei catalog`);
+      return;
+    }
+
     setEstimateLoading(true);
     setAppError("");
 
     try {
       const quantity = Number.parseInt(configQuantity, 10) || 1;
-      const hours = Number.parseInt(configHours, 10) || 744;
+      const durationValue = Number.parseInt(configHours, 10) || Number.parseInt(getDefaultDurationValue(catalogPricingMode), 10) || 1;
       const diskSize = Number.parseInt(configDiskSize, 10) || 40;
       const nextRegion = catalogRegion.trim() || DEFAULT_REGION;
       const pricingCatalog = nextRegion === catalogRegion.trim() && catalogResult
@@ -1113,11 +1261,12 @@ export default function Home() {
         flavorCode: selectedFlavor.resourceSpecCode,
         diskType: configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
         diskSize,
-        hours,
+        durationValue,
         quantity,
+        pricingMode: catalogPricingMode,
       });
       if (!estimate) {
-        throw new Error(`Cached pricing data is unavailable for ${selectedFlavor.resourceSpecCode} in ${nextRegion}`);
+        throw new Error(`Cached ${getPricingModeLabel(catalogPricingMode)} pricing data is unavailable for ${selectedFlavor.resourceSpecCode} in ${nextRegion}`);
       }
 
       setCatalogResult(pricingCatalog);
@@ -1129,8 +1278,9 @@ export default function Home() {
         selectedFlavor.resourceSpecCode,
         configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
         diskSize,
-        hours,
+        durationValue,
         quantity,
+        catalogPricingMode,
       );
       setEstimateResult(result);
     } catch (error) {
@@ -1155,13 +1305,14 @@ export default function Home() {
     const sampleBody = editTemplate.bodyJson as EditCartPayload;
     const sampleItem = sampleBody.cartListData[0];
     const quantity = Number.parseInt(configQuantity, 10) || 1;
-    const hours = Number.parseInt(configHours, 10) || 744;
+    const durationValue = Number.parseInt(configHours, 10) || Number.parseInt(getDefaultDurationValue(catalogPricingMode), 10) || 1;
     const diskSize = Number.parseInt(configDiskSize, 10) || 40;
 
     const payload = buildCalculatorItemPayload(sampleItem, selectedFlavor, estimateBody, {
       region: catalogRegion.trim() || DEFAULT_REGION,
       quantity,
-      hours,
+      durationValue,
+      pricingMode: catalogPricingMode,
       diskType: configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
       diskSize,
       title: configTitle.trim() || selectedFlavor.resourceSpecCode,
@@ -1174,7 +1325,10 @@ export default function Home() {
       description: configDescription.trim() || "Generated from the custom calculator",
       region: catalogRegion.trim() || DEFAULT_REGION,
       quantity,
-      hours,
+      hours: durationValue,
+      pricingMode: catalogPricingMode,
+      diskPricingMode: getEffectiveDiskPricingMode(catalogPricingMode),
+      durationUnit: getPricingDurationUnit(catalogPricingMode),
       diskType: configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
       diskSize,
       flavorCode: selectedFlavor.resourceSpecCode,
@@ -1290,13 +1444,14 @@ export default function Home() {
     }
 
     const quantity = Number.parseInt(configQuantity, 10) || 1;
-    const hours = Number.parseInt(configHours, 10) || 744;
+    const durationValue = Number.parseInt(configHours, 10) || Number.parseInt(getDefaultDurationValue(catalogPricingMode), 10) || 1;
     const diskSize = Number.parseInt(configDiskSize, 10) || 40;
 
     const nextPayload = buildCalculatorItemPayload(editingRemoteItem.payload, selectedFlavor, estimateBody, {
       region: catalogRegion.trim() || editingRemoteItem.region,
       quantity,
-      hours,
+      durationValue,
+      pricingMode: catalogPricingMode,
       diskType: configDiskType.trim() || editingRemoteItem.diskType,
       diskSize,
       title: configTitle.trim() || selectedFlavor.resourceSpecCode,
@@ -1391,7 +1546,7 @@ export default function Home() {
                 Build an ECS proposal, price it, and publish it into a Huawei cart.
               </h1>
               <p className="mt-4 text-base leading-7 text-slate-600">
-                Choose a target cart, browse flavors, configure compute and disk, estimate monthly cost, stage multiple
+                Choose a target cart, browse flavors, configure compute and disk, estimate cost, stage multiple
                 products, and then write the calculator state into the selected share cart.
               </p>
             </div>
@@ -1556,8 +1711,9 @@ export default function Home() {
                       <p className="mt-2 text-sm text-slate-600">{item.description}</p>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <span className="pill">{item.region}</span>
+                        <span className="pill">{getPricingModeLabel(item.pricingMode)}</span>
                         <span className="pill">{item.quantity}x</span>
-                        <span className="pill">{item.hours}h</span>
+                        <span className="pill">{formatDuration(item.pricingMode, item.hours)}</span>
                         <span className="pill">{item.diskLabel}</span>
                       </div>
                     </div>
@@ -1609,8 +1765,9 @@ export default function Home() {
                         </div>
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
+                        <span className="pill">{getPricingModeLabel(item.pricingMode)}</span>
                         <span className="pill">{item.quantity}x</span>
-                        <span className="pill">{item.hours}h</span>
+                        <span className="pill">{formatDuration(item.pricingMode, item.hours)}</span>
                         <span className="pill">{item.diskType} {item.diskSize}GB</span>
                         <span className="pill">{item.totalAmount.toFixed(2)} {item.currency}</span>
                       </div>
@@ -1648,7 +1805,7 @@ export default function Home() {
                   <p className="eyebrow">Step 2</p>
                   <h2 className="mt-1 text-2xl font-semibold">Browse ECS flavors</h2>
                 </div>
-                <div className="flex items-end gap-3">
+                <div className="flex flex-wrap items-end gap-3">
                   <div>
                     <label className="label" htmlFor="catalog-region">
                       Region
@@ -1657,6 +1814,18 @@ export default function Home() {
                       {catalogRegionOptions.map((region) => (
                         <option key={region.id} value={region.id}>
                           {region.name === region.id ? region.id : `${region.name} (${region.id})`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label" htmlFor="catalog-pricing-mode">
+                      Pricing type
+                    </label>
+                    <select className="field min-w-[180px]" id="catalog-pricing-mode" onChange={(event) => setCatalogPricingMode(event.target.value as CatalogPricingMode)} value={catalogPricingMode}>
+                      {PRICING_MODE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
                         </option>
                       ))}
                     </select>
@@ -1722,7 +1891,7 @@ export default function Home() {
                     <span>vCPU</span>
                     <span>RAM</span>
                     <span>Type</span>
-                    <span>Base hourly price</span>
+                    <span>{getPricingRateLabel(catalogPricingMode)}</span>
                   </div>
 
                   <div className="flavor-matrix-body mt-2 space-y-2">
@@ -1745,7 +1914,7 @@ export default function Home() {
                         <div className="text-sm text-slate-700">{getFlavorMemoryGb(flavor).toFixed(0)} GB</div>
                         <div className="text-sm text-slate-700">{flavor.performType ?? "General"}</div>
                         <div className="text-sm font-semibold text-slate-900">
-                          {Number.isFinite(getFlavorBasePrice(flavor)) ? getFlavorBasePrice(flavor).toFixed(4) : "-"}
+                          {Number.isFinite(getFlavorBasePrice(flavor, catalogPricingMode)) ? getFlavorBasePrice(flavor, catalogPricingMode).toFixed(4) : "-"}
                         </div>
                       </button>
                     ))}
@@ -1810,7 +1979,7 @@ export default function Home() {
                     </div>
                     <div>
                       <label className="label" htmlFor="config-hours">
-                        Hours
+                        {getPricingDurationLabel(catalogPricingMode)}
                       </label>
                       <select className="field" id="config-hours" onChange={(event) => setConfigHours(event.target.value)} value={configHours}>
                         {configHourOptions.map((option) => (
@@ -1868,8 +2037,22 @@ export default function Home() {
                       <p className="mt-3 text-2xl font-semibold text-slate-900">{selectedFlavor.resourceSpecCode}</p>
                       <p className="mt-1 text-sm text-slate-600">{getFlavorLabel(selectedFlavor)}</p>
                       <p className="mt-3 text-sm font-semibold text-slate-900">
-                        Base hourly price: {Number.isFinite(getFlavorBasePrice(selectedFlavor)) ? getFlavorBasePrice(selectedFlavor).toFixed(4) : "-"}
+                        {getPricingRateLabel(catalogPricingMode)}: {selectedFlavorSupportsPricingMode ? selectedFlavorPrice.toFixed(4) : "-"}
                       </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <span className="pill">{getPricingModeLabel(catalogPricingMode)}</span>
+                        <span className="pill">Disk: {getPricingModeLabel(getEffectiveDiskPricingMode(catalogPricingMode))}</span>
+                      </div>
+                      {!selectedFlavorSupportsPricingMode ? (
+                        <p className="mt-3 text-sm text-amber-700">
+                          This flavor does not expose {getPricingModeLabel(catalogPricingMode)} pricing in the cached Huawei catalog for {catalogRegion}.
+                        </p>
+                      ) : null}
+                      {catalogPricingMode === "RI" ? (
+                        <p className="mt-3 text-sm text-slate-600">
+                          RI uses Huawei&apos;s effective hourly VM rate. Disk pricing stays on-demand because the cached disk catalog does not expose RI plans.
+                        </p>
+                      ) : null}
                       <p className="mt-4 text-sm leading-6 text-slate-600">
                         {selectedFlavor.productSpecDesc || selectedFlavor.productSpecSysDesc || "No description available"}
                       </p>
@@ -1879,8 +2062,8 @@ export default function Home() {
                   )}
 
                   <div className="mt-5 flex flex-wrap gap-3">
-                    <button className="btn btn-primary" disabled={estimateLoading || loadingTemplates || !selectedFlavor} onClick={() => void estimatePrice()} type="button">
-                      {estimateLoading ? "Estimating..." : "Estimate ECS monthly price"}
+                    <button className="btn btn-primary" disabled={estimateLoading || loadingTemplates || !selectedFlavor || !selectedFlavorSupportsPricingMode} onClick={() => void estimatePrice()} type="button">
+                      {estimateLoading ? "Estimating..." : `Estimate ${getPricingModeLabel(catalogPricingMode)} price`}
                     </button>
                     <button className="btn btn-secondary" disabled={!estimateBody} onClick={addEstimatedItem} type="button">
                       {editorTarget?.kind === "draft" ? "Save draft changes" : "Add product to draft"}

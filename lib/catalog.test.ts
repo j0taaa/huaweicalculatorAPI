@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { buildCatalogPriceEstimate, dedupeCatalogFlavors, getCatalogFlavors, getDiskBasePrice, getFlavorBasePrice, type ProductDisk, type ProductFlavor } from "@/lib/catalog";
+import {
+  buildCatalogPriceEstimate,
+  dedupeCatalogFlavors,
+  getCatalogFlavors,
+  getDiskBasePrice,
+  getEffectiveDiskPricingMode,
+  getFlavorBasePrice,
+  type ProductDisk,
+  type ProductFlavor,
+} from "@/lib/catalog";
 
 function makeFlavor(
   resourceSpecCode: string,
@@ -85,7 +94,30 @@ describe("catalog helpers", () => {
     }))).toBe(0.000247);
   });
 
-  test("buildCatalogPriceEstimate calculates VM and disk totals from cached catalog data", () => {
+  test("getFlavorBasePrice can read MONTHLY, YEARLY, and RI plan pricing", () => {
+    const flavor = makeFlavor("x1.small", {
+      planList: [
+        { billingMode: "MONTHLY", amount: 33.85 },
+        { billingMode: "YEARLY", amount: 310.28 },
+        { billingMode: "RI", originType: "price", amount: 0 },
+        { billingMode: "RI", originType: "perPrice", amount: 45.04 },
+        { billingMode: "RI", originType: "perEffectivePrice", amount: 0.0617 },
+      ],
+    });
+
+    expect(getFlavorBasePrice(flavor, "MONTHLY")).toBe(33.85);
+    expect(getFlavorBasePrice(flavor, "YEARLY")).toBe(310.28);
+    expect(getFlavorBasePrice(flavor, "RI")).toBe(0.0617);
+  });
+
+  test("getEffectiveDiskPricingMode falls back to ONDEMAND for RI", () => {
+    expect(getEffectiveDiskPricingMode("ONDEMAND")).toBe("ONDEMAND");
+    expect(getEffectiveDiskPricingMode("MONTHLY")).toBe("MONTHLY");
+    expect(getEffectiveDiskPricingMode("YEARLY")).toBe("YEARLY");
+    expect(getEffectiveDiskPricingMode("RI")).toBe("ONDEMAND");
+  });
+
+  test("buildCatalogPriceEstimate calculates ONDEMAND totals from cached catalog data", () => {
     const estimate = buildCatalogPriceEstimate({
       product: {
         ec2_vm: [
@@ -105,8 +137,9 @@ describe("catalog helpers", () => {
       flavorCode: "x1.small",
       diskType: "GPSSD",
       diskSize: 40,
-      hours: 10,
+      durationValue: 10,
       quantity: 2,
+      pricingMode: "ONDEMAND",
     });
 
     expect(estimate).toEqual({
@@ -128,6 +161,107 @@ describe("catalog helpers", () => {
           amount: 8,
           discountAmount: 0,
           originalAmount: 8,
+        },
+      ],
+    });
+  });
+
+  test("buildCatalogPriceEstimate calculates MONTHLY totals from cached catalog data", () => {
+    const estimate = buildCatalogPriceEstimate({
+      product: {
+        ec2_vm: [
+          makeFlavor("x1.small", {
+            productId: "vm-monthly",
+            planList: [{ billingMode: "MONTHLY", amount: 33.85 }],
+          }),
+        ],
+        ebs_volume: [
+          makeDisk("GPSSD", {
+            productId: "disk-monthly",
+            planList: [{ billingMode: "MONTHLY", amount: 0.18 }],
+          }),
+        ],
+      },
+    }, {
+      flavorCode: "x1.small",
+      diskType: "GPSSD",
+      diskSize: 40,
+      durationValue: 3,
+      quantity: 2,
+      pricingMode: "MONTHLY",
+    });
+
+    expect(estimate).toEqual({
+      amount: 246.3,
+      discountAmount: 0,
+      originalAmount: 246.3,
+      currency: "USD",
+      productRatingResult: [
+        {
+          id: "cached-vm-vm-monthly",
+          productId: "vm-monthly",
+          amount: 203.1,
+          discountAmount: 0,
+          originalAmount: 203.1,
+        },
+        {
+          id: "cached-disk-disk-monthly",
+          productId: "disk-monthly",
+          amount: 43.2,
+          discountAmount: 0,
+          originalAmount: 43.2,
+        },
+      ],
+    });
+  });
+
+  test("buildCatalogPriceEstimate uses RI VM pricing and ONDEMAND disk fallback", () => {
+    const estimate = buildCatalogPriceEstimate({
+      product: {
+        ec2_vm: [
+          makeFlavor("x1.small", {
+            productId: "vm-ri",
+            planList: [
+              { billingMode: "RI", originType: "perPrice", amount: 45.04 },
+              { billingMode: "RI", originType: "perEffectivePrice", amount: 0.0617 },
+            ],
+          }),
+        ],
+        ebs_volume: [
+          makeDisk("GPSSD", {
+            productId: "disk-ondemand",
+            bakPlanList: [{ billingMode: "ONDEMAND", amount: 0.01 }],
+          }),
+        ],
+      },
+    }, {
+      flavorCode: "x1.small",
+      diskType: "GPSSD",
+      diskSize: 40,
+      durationValue: 24,
+      quantity: 1,
+      pricingMode: "RI",
+    });
+
+    expect(estimate).toEqual({
+      amount: 11.0808,
+      discountAmount: 0,
+      originalAmount: 11.0808,
+      currency: "USD",
+      productRatingResult: [
+        {
+          id: "cached-vm-vm-ri",
+          productId: "vm-ri",
+          amount: 1.4808,
+          discountAmount: 0,
+          originalAmount: 1.4808,
+        },
+        {
+          id: "cached-disk-disk-ondemand",
+          productId: "disk-ondemand",
+          amount: 9.6,
+          discountAmount: 0,
+          originalAmount: 9.6,
         },
       ],
     });
