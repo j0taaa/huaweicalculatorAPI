@@ -268,7 +268,8 @@ const CONFIG_MONTH_OPTIONS = ["1", "3", "6", "12", "24", "36"];
 const CONFIG_YEAR_OPTIONS = ["1", "2", "3"];
 const CONFIG_QUANTITY_OPTIONS = ["1", "2", "3", "5", "10"];
 const DEFAULT_REGION = "sa-brazil-1";
-const DEFAULT_CATALOG_DISK_TYPE = "GPSSD";
+const DEFAULT_CATALOG_DISK_TYPE = "SAS";
+const DEFAULT_CATALOG_DISK_SIZE = "40";
 const DEFAULT_PRICING_MODE: CatalogPricingMode = "ONDEMAND";
 const PRICING_MODE_OPTIONS: Array<{ value: CatalogPricingMode; label: string }> = [
   { value: "ONDEMAND", label: "On-demand" },
@@ -276,6 +277,14 @@ const PRICING_MODE_OPTIONS: Array<{ value: CatalogPricingMode; label: string }> 
   { value: "YEARLY", label: "Yearly" },
   { value: "RI", label: "RI (1 year)" },
 ];
+const DISK_TYPE_LABELS: Record<string, string> = {
+  SATA: "Common I/O",
+  SAS: "High I/O",
+  SSD: "Ultra-high I/O",
+  ESSD: "Extreme SSD",
+  GPSSD: "General Purpose SSD",
+  GPSSD2: "General Purpose SSD V2",
+};
 
 function isCatalogPricingMode(value: string): value is CatalogPricingMode {
   return PRICING_MODE_OPTIONS.some((option) => option.value === value);
@@ -595,9 +604,18 @@ function getFlavorSpec(flavor: ProductFlavor): string {
   return flavor.resourceSpecCode.replace(/\.linux$/, "");
 }
 
+function getDiskTypeDisplayName(diskType: string): string {
+  const trimmed = diskType.trim();
+  return DISK_TYPE_LABELS[trimmed] ?? trimmed;
+}
+
 function getDiskTypeLabel(disk: ProductDisk): string {
-  const description = typeof disk.productSpecDesc === "string" ? disk.productSpecDesc.trim() : "";
-  return description ? `${disk.resourceSpecCode} · ${description}` : disk.resourceSpecCode;
+  return getDiskTypeDisplayName(disk.resourceSpecCode);
+}
+
+function formatDiskLabel(diskType: string, diskSize: number): string {
+  const label = getDiskTypeDisplayName(diskType);
+  return diskSize > 0 ? `${label} ${diskSize}GB` : label;
 }
 
 function getSelectedFlavor(flavors: ProductFlavor[], code: string): ProductFlavor | null {
@@ -644,7 +662,7 @@ function getRemoteCartItems(detail: ShareCartDetail | null): RemoteCartItem[] {
       durationUnit,
       diskType,
       diskSize,
-      diskLabel: diskSize > 0 ? `${diskType} ${diskSize}GB` : diskType,
+      diskLabel: formatDiskLabel(diskType, diskSize),
       flavorCode,
       totalAmount: selectedProduct.amount ?? 0,
       originalAmount: selectedProduct.originalAmount ?? selectedProduct.amount ?? 0,
@@ -980,7 +998,7 @@ export default function Home() {
   const [flavorPage, setFlavorPage] = useState(1);
 
   const [configDiskType, setConfigDiskType] = useState(DEFAULT_CATALOG_DISK_TYPE);
-  const [configDiskSize, setConfigDiskSize] = useState("40");
+  const [configDiskSize, setConfigDiskSize] = useState(DEFAULT_CATALOG_DISK_SIZE);
   const [configHours, setConfigHours] = useState("744");
   const [configQuantity, setConfigQuantity] = useState("1");
   const [configTitle, setConfigTitle] = useState("Elastic Cloud Server");
@@ -989,6 +1007,8 @@ export default function Home() {
   { name: "VM 1vCPU 16GB", vcpus: 1, ram: 16 },
   { name: "VM 2vCPU 4GB", vcpus: 2, ram: 4 }
 ]`);
+  const [bulkDiskType, setBulkDiskType] = useState(DEFAULT_CATALOG_DISK_TYPE);
+  const [bulkDiskSize, setBulkDiskSize] = useState(DEFAULT_CATALOG_DISK_SIZE);
   const [bulkMatchLoading, setBulkMatchLoading] = useState(false);
   const [bulkMatchSummary, setBulkMatchSummary] = useState("");
   const [bulkMatchResults, setBulkMatchResults] = useState<BulkEcsMatch[]>([]);
@@ -1123,6 +1143,12 @@ export default function Home() {
       configDiskType,
     );
   }, [catalogDisks, configDiskType]);
+  const bulkDiskTypeOptions = useMemo(() => {
+    return withCurrentOption(
+      [...new Set(catalogDisks.map((disk) => disk.resourceSpecCode.trim()).filter(Boolean))],
+      bulkDiskType,
+    );
+  }, [bulkDiskType, catalogDisks]);
   const configHourOptions = withCurrentOption(getPricingDurationOptions(catalogPricingMode), configHours);
   const configQuantityOptions = withCurrentOption(CONFIG_QUANTITY_OPTIONS, configQuantity);
 
@@ -1134,6 +1160,26 @@ export default function Home() {
     ));
     setEstimateResult(null);
   }, [catalogPricingMode]);
+
+  useEffect(() => {
+    if (!catalogDisks.length) {
+      return;
+    }
+
+    const availableDiskCodes = catalogDisks
+      .map((disk) => disk.resourceSpecCode.trim())
+      .filter(Boolean);
+    const fallbackDiskType = availableDiskCodes.includes(DEFAULT_CATALOG_DISK_TYPE)
+      ? DEFAULT_CATALOG_DISK_TYPE
+      : availableDiskCodes[0] ?? DEFAULT_CATALOG_DISK_TYPE;
+
+    if (!availableDiskCodes.includes(configDiskType)) {
+      setConfigDiskType(fallbackDiskType);
+    }
+    if (!availableDiskCodes.includes(bulkDiskType)) {
+      setBulkDiskType(fallbackDiskType);
+    }
+  }, [bulkDiskType, catalogDisks, configDiskType]);
 
   useEffect(() => {
     setCartPage(1);
@@ -1354,8 +1400,8 @@ export default function Home() {
 
     const quantity = Number.parseInt(configQuantity, 10) || 1;
     const durationValue = getNormalizedDurationValue(catalogPricingMode, configHours);
-    const diskType = configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE;
-    const diskSize = Number.parseInt(configDiskSize, 10) || 40;
+    const diskType = bulkDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE;
+    const diskSize = Number.parseInt(bulkDiskSize, 10) || Number.parseInt(DEFAULT_CATALOG_DISK_SIZE, 10);
     const descriptionBase = configDescription.trim() || "Generated from the custom calculator";
     const matchedItems = requests.map((request) => {
       const flavor = selectCheapestFlavorForRequirements(nextFlavors, {
@@ -2218,7 +2264,7 @@ export default function Home() {
                         <span className="pill">{getPricingModeLabel(item.pricingMode)}</span>
                         <span className="pill">{item.quantity}x</span>
                         {item.pricingMode === "RI" ? null : <span className="pill">{formatDuration(item.pricingMode, item.hours)}</span>}
-                        <span className="pill">{item.diskType} {item.diskSize}GB</span>
+                        <span className="pill">{formatDiskLabel(item.diskType, item.diskSize)}</span>
                         <span className="pill">{item.totalAmount.toFixed(2)} {item.currency}</span>
                       </div>
                     </div>
@@ -2469,7 +2515,7 @@ export default function Home() {
                           const disk = catalogDisks.find((item) => item.resourceSpecCode === option);
                           return (
                             <option key={option} value={option}>
-                              {disk ? getDiskTypeLabel(disk) : option}
+                              {disk ? getDiskTypeLabel(disk) : getDiskTypeDisplayName(option)}
                             </option>
                           );
                         })}
@@ -2582,8 +2628,32 @@ export default function Home() {
                   />
 
                   <p className="mt-3 text-sm text-slate-500">
-                    Uses the current quantity, duration, disk type, and disk size from this step for every matched ECS.
+                    Uses the current quantity and duration from this step, plus the EVS settings below, for every matched ECS.
                   </p>
+
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="label" htmlFor="bulk-disk-type">
+                        EVS type
+                      </label>
+                      <select className="field" id="bulk-disk-type" onChange={(event) => setBulkDiskType(event.target.value)} value={bulkDiskType}>
+                        {bulkDiskTypeOptions.map((option) => {
+                          const disk = catalogDisks.find((item) => item.resourceSpecCode === option);
+                          return (
+                            <option key={option} value={option}>
+                              {disk ? getDiskTypeLabel(disk) : getDiskTypeDisplayName(option)}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label" htmlFor="bulk-disk-size">
+                        EVS size (GB)
+                      </label>
+                      <input className="field" id="bulk-disk-size" onChange={(event) => setBulkDiskSize(event.target.value)} value={bulkDiskSize} />
+                    </div>
+                  </div>
 
                   <div className="mt-4 flex flex-wrap gap-3">
                     <button className="btn btn-primary" disabled={bulkMatchLoading || loadingTemplates} onClick={() => void addBulkMatchesToDraft()} type="button">
@@ -2601,9 +2671,7 @@ export default function Home() {
                         <div className="mt-3 space-y-2">
                           {bulkMatchResults.map((match, index) => (
                             <div key={`${match.request.name}-${match.flavorCode}-${index}`} className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-700">
-                              <span>
-                                {match.request.name} - {match.flavorCode} ({match.matchedVcpus} vCPU / {match.matchedRamGb.toFixed(0)} GB)
-                              </span>
+                              <span>{match.request.name} - {match.flavorCode} ({match.matchedVcpus} vCPU / {match.matchedRamGb.toFixed(0)} GB)</span>
                               <span className="pill">{match.totalAmount.toFixed(2)} {match.currency}</span>
                             </div>
                           ))}
