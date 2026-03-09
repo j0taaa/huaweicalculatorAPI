@@ -314,8 +314,8 @@ const DEFAULT_REGION = "sa-brazil-1";
 const DEFAULT_CATALOG_DISK_TYPE = "SAS";
 const DEFAULT_CATALOG_DISK_SIZE = "40";
 const DEFAULT_SERVICE: CalculatorService = "ecs";
-const DEFAULT_EVS_TITLE = "Elastic Volume Service";
-const DEFAULT_EVS_DESCRIPTION = "Generated from the custom calculator";
+const DEFAULT_ECS_DESCRIPTION = "Elastic Cloud Server";
+const DEFAULT_EVS_DESCRIPTION = "Elastic Volume Service";
 const MAX_EVS_DISK_SIZE_GB = 32768;
 const DEFAULT_PRICING_MODE: CatalogPricingMode = "ONDEMAND";
 const PRICING_MODE_OPTIONS: Array<{ value: CatalogPricingMode; label: string }> = [
@@ -740,8 +740,13 @@ function splitDiskSize(totalSize: number): number[] {
 }
 
 function buildSplitDiskTitle(baseTitle: string, index: number, total: number): string {
-  const trimmed = baseTitle.trim() || DEFAULT_EVS_TITLE;
+  const trimmed = baseTitle.trim() || DEFAULT_EVS_DESCRIPTION;
   return total > 1 ? `${trimmed} ${index + 1}/${total}` : trimmed;
+}
+
+function resolveItemDescription(value: string, fallback: string): string {
+  const trimmed = value.trim();
+  return trimmed || fallback;
 }
 
 function getSelectedFlavor(flavors: ProductFlavor[], code: string): ProductFlavor | null {
@@ -767,25 +772,20 @@ function getRemoteCartItems(detail: ShareCartDetail | null): RemoteCartItem[] {
       : normalizeDiskTypeApiCode(typeof diskInfo.resourceSpecCode === "string" ? diskInfo.resourceSpecCode : "Unknown disk");
     const diskType = normalizeDiskTypeApiCode(typeof diskInfo.resourceSpecCode === "string" ? diskInfo.resourceSpecCode : "Disk");
     const diskSize = typeof diskInfo.resourceSize === "number" ? diskInfo.resourceSize : 0;
-    const title = selectedProduct._customTitle?.trim()
-      || selectedProduct.description?.trim()
+    const storedDescription = selectedProduct.description?.trim()
+      || (typeof item.rewriteValue?.global_DESCRIPTION === "string" ? item.rewriteValue.global_DESCRIPTION.trim() : "")
+      || selectedProduct._customTitle?.trim()
+      || (service === "ecs" ? DEFAULT_ECS_DESCRIPTION : DEFAULT_EVS_DESCRIPTION);
+    const title = storedDescription
       || (service === "ecs" ? resourceCode : formatDiskLabel(diskType, diskSize))
       || `Item ${index + 1}`;
-    const descriptionParts = [
-      service === "ecs" && typeof vmInfo.performType === "string" ? vmInfo.performType : null,
-      service === "ecs" && typeof vmInfo.instanceArch === "string" ? vmInfo.instanceArch : null,
-      service === "evs" ? getDiskTypeDisplayName(diskType) : null,
-      typeof item.rewriteValue?.global_DESCRIPTION === "string" && item.rewriteValue.global_DESCRIPTION.trim()
-        ? item.rewriteValue.global_DESCRIPTION.trim()
-        : null,
-    ].filter(Boolean);
 
     return {
       id: `${service}-${resourceCode}-${index}`,
       index,
       service,
       title,
-      description: descriptionParts.join(" / ") || (service === "ecs" ? "Elastic Cloud Server" : "Elastic Volume Service"),
+      description: storedDescription,
       region: selectedProduct.region?.trim() || "Unknown region",
       quantity: selectedProduct.purchaseNum?.measureValue ?? (typeof vmInfo.productNum === "number" ? vmInfo.productNum : 1),
       hours: selectedProduct.purchaseTime?.measureValue ?? (typeof vmInfo.usageValue === "number" ? vmInfo.usageValue : 744),
@@ -1345,8 +1345,7 @@ export default function Home() {
   const [configDiskSize, setConfigDiskSize] = useState(DEFAULT_CATALOG_DISK_SIZE);
   const [configHours, setConfigHours] = useState("744");
   const [configQuantity, setConfigQuantity] = useState("1");
-  const [configTitle, setConfigTitle] = useState("Elastic Cloud Server");
-  const [configDescription, setConfigDescription] = useState("Generated from the custom calculator");
+  const [configDescription, setConfigDescription] = useState(DEFAULT_ECS_DESCRIPTION);
   const [bulkEcsInput, setBulkEcsInput] = useState(`[
   { name: "VM 1vCPU 16GB", vcpus: 1, ram: 16 },
   { name: "VM 2vCPU 4GB", vcpus: 2, ram: 4 }
@@ -1521,10 +1520,8 @@ export default function Home() {
 
     setEstimateResult(null);
     if (selectedService === "ecs") {
-      setConfigTitle((current) => current || "Elastic Cloud Server");
-      setConfigDescription((current) => current || "Generated from the custom calculator");
+      setConfigDescription((current) => current || DEFAULT_ECS_DESCRIPTION);
     } else {
-      setConfigTitle((current) => current || DEFAULT_EVS_TITLE);
       setConfigDescription((current) => current || DEFAULT_EVS_DESCRIPTION);
     }
   }, [catalogPricingMode, selectedService]);
@@ -1758,7 +1755,6 @@ export default function Home() {
 
         if (preferred) {
           setSelectedFlavorCode(preferred.resourceSpecCode);
-          setConfigTitle((current) => current || preferred.resourceSpecCode);
         }
 
         return nextFlavors;
@@ -1808,7 +1804,7 @@ export default function Home() {
     const durationValue = getNormalizedDurationValue(catalogPricingMode, configHours);
     const diskType = normalizeDiskTypeApiCode(bulkDiskType) || DEFAULT_CATALOG_DISK_TYPE;
     const diskSize = Number.parseInt(bulkDiskSize, 10) || Number.parseInt(DEFAULT_CATALOG_DISK_SIZE, 10);
-    const descriptionBase = configDescription.trim() || "Generated from the custom calculator";
+    const descriptionBase = resolveItemDescription(configDescription, DEFAULT_ECS_DESCRIPTION);
     const matchedItems = requests.map((request) => {
       const flavor = selectCheapestFlavorForRequirements(nextFlavors, {
         pricingMode: catalogPricingMode,
@@ -1837,7 +1833,7 @@ export default function Home() {
         );
       }
 
-      const description = `${descriptionBase} - minimum ${request.vcpus} vCPU / ${request.ram} GB RAM`;
+      const description = resolveItemDescription(request.name, descriptionBase);
       const item = buildEcsCalculatorItem(sampleItem, flavor, estimate, {
         region: nextRegion,
         quantity,
@@ -1845,7 +1841,7 @@ export default function Home() {
         pricingMode: catalogPricingMode,
         diskType,
         diskSize,
-        title: request.name,
+        title: description,
         description,
       });
 
@@ -1960,7 +1956,7 @@ export default function Home() {
     const quantity = Number.parseInt(configQuantity, 10) || 1;
     const durationValue = getNormalizedDurationValue(catalogPricingMode, configHours);
     const defaultType = normalizeDiskTypeApiCode(bulkDiskType) || DEFAULT_CATALOG_DISK_TYPE;
-    const descriptionBase = configDescription.trim() || DEFAULT_EVS_DESCRIPTION;
+    const descriptionBase = resolveItemDescription(configDescription, DEFAULT_EVS_DESCRIPTION);
     const diskMap = new Map(getCatalogDisks(pricingCatalog.response.body).map((disk) => [disk.resourceSpecCode, disk]));
     const items: CalculatorItem[] = [];
     const matches: BulkEvsMatch[] = [];
@@ -1992,6 +1988,7 @@ export default function Home() {
         }
 
         totalAmount += estimate.amount;
+        const description = buildSplitDiskTitle(request.name?.trim() || descriptionBase, index, diskSizes.length);
         items.push(buildEvsCalculatorItem(sampleItem, disk, estimate, {
           region: nextRegion,
           quantity,
@@ -1999,8 +1996,8 @@ export default function Home() {
           pricingMode: catalogPricingMode as Exclude<CatalogPricingMode, "RI">,
           diskType,
           diskSize: chunkSize,
-          title: buildSplitDiskTitle(request.name?.trim() || DEFAULT_EVS_TITLE, index, diskSizes.length),
-          description: descriptionBase,
+          title: description,
+          description,
         }));
       }
 
@@ -2094,8 +2091,7 @@ export default function Home() {
     setConfigHours(String(item.hours));
     setConfigDiskType(normalizeDiskTypeApiCode(item.diskType));
     setConfigDiskSize(String(item.diskSize));
-    setConfigTitle(item.title);
-    setConfigDescription(item.description);
+    setConfigDescription(item.description || item.title);
     setEstimateResult(null);
     if (item.service === "ecs") {
       setSelectedFlavorCode(item.resourceCode);
@@ -2113,8 +2109,7 @@ export default function Home() {
     setConfigHours(String(item.hours));
     setConfigDiskType(normalizeDiskTypeApiCode(item.diskType));
     setConfigDiskSize(String(item.diskSize));
-    setConfigTitle(item.title);
-    setConfigDescription(item.description);
+    setConfigDescription(item.description || item.title);
     setEstimateResult(null);
     if (item.service === "ecs") {
       setSelectedFlavorCode(item.resourceCode);
@@ -2323,8 +2318,8 @@ export default function Home() {
         pricingMode: catalogPricingMode,
         diskType: normalizeDiskTypeApiCode(configDiskType) || DEFAULT_CATALOG_DISK_TYPE,
         diskSize,
-        title: configTitle.trim() || selectedFlavor.resourceSpecCode,
-        description: configDescription.trim() || "Generated from the custom calculator",
+        title: resolveItemDescription(configDescription, selectedFlavor.resourceSpecCode),
+        description: resolveItemDescription(configDescription, selectedFlavor.resourceSpecCode),
       });
 
       setCalculatorItems((current) => {
@@ -2356,6 +2351,7 @@ export default function Home() {
         throw new Error(`Unable to build the EVS payload for ${getDiskTypeDisplayName(configDiskType)}`);
       }
 
+      const description = buildSplitDiskTitle(resolveItemDescription(configDescription, DEFAULT_EVS_DESCRIPTION), index, chunkSizes.length);
       return buildEvsCalculatorItem(sampleItem, selectedDisk, chunkEstimate, {
         id: editingDraftItem && chunkSizes.length === 1 ? editingDraftItem.id : undefined,
         region: nextRegion,
@@ -2364,8 +2360,8 @@ export default function Home() {
         pricingMode: catalogPricingMode as Exclude<CatalogPricingMode, "RI">,
         diskType: normalizeDiskTypeApiCode(configDiskType) || DEFAULT_CATALOG_DISK_TYPE,
         diskSize: chunkSize,
-        title: buildSplitDiskTitle(configTitle.trim() || DEFAULT_EVS_TITLE, index, chunkSizes.length),
-        description: configDescription.trim() || DEFAULT_EVS_DESCRIPTION,
+        title: description,
+        description,
       });
     });
 
@@ -2611,8 +2607,8 @@ export default function Home() {
           pricingMode: catalogPricingMode,
           diskType: normalizeDiskTypeApiCode(configDiskType) || normalizeDiskTypeApiCode(editingRemoteItem.diskType),
           diskSize,
-          title: configTitle.trim() || selectedFlavor.resourceSpecCode,
-          description: configDescription.trim() || editingRemoteItem.description,
+          title: resolveItemDescription(configDescription, selectedFlavor.resourceSpecCode),
+          description: resolveItemDescription(configDescription, editingRemoteItem.description || selectedFlavor.resourceSpecCode),
         }),
       ];
     } else {
@@ -2634,6 +2630,7 @@ export default function Home() {
           throw new Error(`Unable to update ${getDiskTypeDisplayName(configDiskType)}`);
         }
 
+        const description = buildSplitDiskTitle(resolveItemDescription(configDescription, editingRemoteItem.description || DEFAULT_EVS_DESCRIPTION), index, chunkSizes.length);
         return buildEvsCalculatorItemPayload(editingRemoteItem.payload, selectedDisk, chunkEstimate, {
           region: catalogRegion.trim() || editingRemoteItem.region,
           quantity,
@@ -2641,8 +2638,8 @@ export default function Home() {
           pricingMode: catalogPricingMode as Exclude<CatalogPricingMode, "RI">,
           diskType: normalizeDiskTypeApiCode(configDiskType) || normalizeDiskTypeApiCode(editingRemoteItem.diskType),
           diskSize: chunkSize,
-          title: buildSplitDiskTitle(configTitle.trim() || DEFAULT_EVS_TITLE, index, chunkSizes.length),
-          description: configDescription.trim() || editingRemoteItem.description,
+          title: description,
+          description,
         });
       });
     }
@@ -2739,10 +2736,8 @@ export default function Home() {
                   setEditorTarget(null);
                   setEstimateResult(null);
                   if (service.value === "ecs") {
-                    setConfigTitle("Elastic Cloud Server");
-                    setConfigDescription("Generated from the custom calculator");
+                    setConfigDescription(DEFAULT_ECS_DESCRIPTION);
                   } else {
-                    setConfigTitle(DEFAULT_EVS_TITLE);
                     setConfigDescription(DEFAULT_EVS_DESCRIPTION);
                   }
                 }}
@@ -3146,7 +3141,6 @@ export default function Home() {
                           className={`flavor-row ${selectedFlavorCode === flavor.resourceSpecCode ? "flavor-row-active" : ""}`}
                           onClick={() => {
                             setSelectedFlavorCode(flavor.resourceSpecCode);
-                            setConfigTitle(flavor.resourceSpecCode);
                             setEstimateResult(null);
                           }}
                           type="button"
@@ -3249,10 +3243,10 @@ export default function Home() {
                   <p className="section-title">Configuration</p>
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     <div>
-                      <label className="label" htmlFor="config-title">
-                        Product title
+                      <label className="label" htmlFor="config-description">
+                        Description
                       </label>
-                      <input className="field" id="config-title" onChange={(event) => setConfigTitle(event.target.value)} value={configTitle} />
+                      <input className="field" id="config-description" onChange={(event) => setConfigDescription(event.target.value)} value={configDescription} />
                     </div>
                     {catalogPricingMode === "RI" ? (
                       <div>
@@ -3312,10 +3306,6 @@ export default function Home() {
                     </div>
                   </div>
 
-                  <label className="label mt-3" htmlFor="config-description">
-                    Description
-                  </label>
-                  <textarea className="field h-24" id="config-description" onChange={(event) => setConfigDescription(event.target.value)} value={configDescription} />
                 </div>
 
                 <div className="soft-panel">
