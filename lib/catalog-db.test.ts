@@ -79,4 +79,22 @@ describe("catalog DB hydration", () => {
     expect(getFlavorBasePrice(flavor, "RI")).toBe(104.68);
     expect(getDiskBasePrice(disk, "ONDEMAND")).toBe(0.000247);
   });
+
+  test("hydrateCatalogEntryPrices marks synthesized RI plans as 1-year", () => {
+    const entry = makeEntry(
+      makeFlavor("x1.2u.4g.linux", {}),
+      makeDisk("GPSSD", {}),
+    );
+
+    const hydrated = hydrateCatalogEntryPrices(entry, [
+      { resource_spec_code: "x1.2u.4g.linux", pricing_mode: "RI", amount: 45.04 },
+    ], []);
+
+    const flavor = (hydrated.response.body as { product: { ec2_vm: ProductFlavor[] } }).product.ec2_vm[0]!;
+    const riPlan = flavor.planList?.find((plan) => plan.billingMode === "RI");
+
+    expect(riPlan?.periodNum).toBe(1);
+    expect(riPlan?.amount).toBe(45.04);
+    expect(getFlavorBasePrice(flavor, "RI")).toBe(45.04);
+  });
 });

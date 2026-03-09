@@ -258,6 +258,7 @@ function ensureCatalogPlanAmount<T extends ProductFlavor | ProductDisk>(
         billingMode: "RI",
         originType: "perPrice",
         amountType: "nodeData.perPrice",
+        periodNum: 1,
         amount,
       });
     } else {

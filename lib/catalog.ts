@@ -306,29 +306,39 @@ function getLowestPlanAmount(plans: CatalogPlan[]): number {
   return amounts.length ? Math.min(...amounts) : Number.POSITIVE_INFINITY;
 }
 
+function getPreferredRiPrice(plans: CatalogPlan[]): number {
+  const preferredRiPrice = getLowestPlanAmount(plans.filter((plan) => (
+    plan.originType === "perPrice" || plan.amountType === "nodeData.perPrice"
+  )));
+  if (Number.isFinite(preferredRiPrice)) {
+    return preferredRiPrice;
+  }
+
+  const fallbackRiPrice = getLowestPlanAmount(plans.filter((plan) => (
+    plan.originType !== "perEffectivePrice" && plan.amountType !== "nodeData.perEffectivePrice"
+  )));
+  if (Number.isFinite(fallbackRiPrice)) {
+    return fallbackRiPrice;
+  }
+
+  return getLowestPlanAmount(plans.filter((plan) => (
+    plan.originType === "perEffectivePrice" || plan.amountType === "nodeData.perEffectivePrice"
+  )));
+}
+
 function getCatalogItemBasePrice(item: CatalogPricedItem, pricingMode: CatalogPricingMode = "ONDEMAND"): number {
   const matchingPlans = getCatalogPlans(item).filter((plan) => (
     typeof plan.amount === "number" && plan.billingMode === pricingMode
   ));
 
   if (pricingMode === "RI") {
-    const preferredRiPrice = getLowestPlanAmount(matchingPlans.filter((plan) => (
-      plan.originType === "perPrice" || plan.amountType === "nodeData.perPrice"
-    )));
-    if (Number.isFinite(preferredRiPrice)) {
-      return preferredRiPrice;
+    const oneYearRiPlans = matchingPlans.filter((plan) => plan.periodNum === 1);
+    const oneYearRiPrice = getPreferredRiPrice(oneYearRiPlans);
+    if (Number.isFinite(oneYearRiPrice)) {
+      return oneYearRiPrice;
     }
 
-    const fallbackRiPrice = getLowestPlanAmount(matchingPlans.filter((plan) => (
-      plan.originType !== "perEffectivePrice" && plan.amountType !== "nodeData.perEffectivePrice"
-    )));
-    if (Number.isFinite(fallbackRiPrice)) {
-      return fallbackRiPrice;
-    }
-
-    const genericRiPrice = getLowestPlanAmount(matchingPlans.filter((plan) => (
-      plan.originType === "perEffectivePrice" || plan.amountType === "nodeData.perEffectivePrice"
-    )));
+    const genericRiPrice = getPreferredRiPrice(matchingPlans);
     if (Number.isFinite(genericRiPrice)) {
       return genericRiPrice;
     }

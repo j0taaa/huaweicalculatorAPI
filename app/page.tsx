@@ -274,7 +274,7 @@ const PRICING_MODE_OPTIONS: Array<{ value: CatalogPricingMode; label: string }> 
   { value: "ONDEMAND", label: "On-demand" },
   { value: "MONTHLY", label: "Monthly" },
   { value: "YEARLY", label: "Yearly" },
-  { value: "RI", label: "RI" },
+  { value: "RI", label: "RI (1 year)" },
 ];
 
 function isCatalogPricingMode(value: string): value is CatalogPricingMode {
@@ -292,7 +292,7 @@ function getPricingRateLabel(pricingMode: CatalogPricingMode): string {
     case "YEARLY":
       return "Base yearly price";
     case "RI":
-      return "RI price";
+      return "1-year RI price";
     default:
       return "Base hourly price";
   }
@@ -2431,7 +2431,7 @@ export default function Home() {
                       <div>
                         <label className="label">RI pricing</label>
                         <div className="field flex min-h-11 items-center bg-slate-50 text-sm text-slate-600">
-                          One-time RI purchase price per instance
+                          One-time 1-year RI purchase price per instance
                         </div>
                       </div>
                     ) : (
@@ -2511,7 +2511,7 @@ export default function Home() {
                       ) : null}
                       {catalogPricingMode === "RI" ? (
                         <p className="mt-3 text-sm text-slate-600">
-                          RI uses Huawei&apos;s RI purchase price. Disk pricing is excluded because the cached disk catalog does not expose RI plans.
+                          RI uses Huawei&apos;s 1-year RI purchase price. Disk pricing is excluded because the cached disk catalog does not expose RI plans.
                         </p>
                       ) : null}
                       <p className="mt-4 text-sm leading-6 text-slate-600">

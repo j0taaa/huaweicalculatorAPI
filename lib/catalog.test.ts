@@ -231,8 +231,9 @@ describe("catalog helpers", () => {
         { billingMode: "MONTHLY", amount: 33.85 },
         { billingMode: "YEARLY", amount: 310.28 },
         { billingMode: "RI", originType: "price", amount: 0 },
-        { billingMode: "RI", originType: "perPrice", amount: 45.04 },
-        { billingMode: "RI", originType: "perEffectivePrice", amount: 0.0617 },
+        { billingMode: "RI", originType: "perPrice", periodNum: 3, amount: 40.04 },
+        { billingMode: "RI", originType: "perPrice", periodNum: 1, amount: 45.04 },
+        { billingMode: "RI", originType: "perEffectivePrice", periodNum: 1, amount: 0.0617 },
       ],
     });
 
@@ -353,8 +354,9 @@ describe("catalog helpers", () => {
           makeFlavor("x1.small", {
             productId: "vm-ri",
             planList: [
-              { billingMode: "RI", originType: "perPrice", amount: 45.04 },
-              { billingMode: "RI", originType: "perEffectivePrice", amount: 0.0617 },
+              { billingMode: "RI", originType: "perPrice", periodNum: 3, amount: 40.04 },
+              { billingMode: "RI", originType: "perPrice", periodNum: 1, amount: 45.04 },
+              { billingMode: "RI", originType: "perEffectivePrice", periodNum: 1, amount: 0.0617 },
             ],
           }),
         ],
