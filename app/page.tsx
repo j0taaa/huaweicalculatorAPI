@@ -4,7 +4,6 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "rea
 import {
   buildCatalogPriceEstimate,
   getEffectiveDiskPricingMode,
-  getCatalogDisks,
   getCatalogFlavors,
   getFlavorBasePrice,
   getFlavorCpuCount,
@@ -12,7 +11,6 @@ import {
   selectCheapestFlavorForRequirements,
   type CatalogPricingMode,
   type PriceResponseBody,
-  type ProductDisk,
   type ProductFlavor,
 } from "@/lib/catalog";
 
@@ -277,14 +275,17 @@ const PRICING_MODE_OPTIONS: Array<{ value: CatalogPricingMode; label: string }> 
   { value: "YEARLY", label: "Yearly" },
   { value: "RI", label: "RI (1 year)" },
 ];
-const DISK_TYPE_LABELS: Record<string, string> = {
-  SATA: "Common I/O",
-  SAS: "High I/O",
-  SSD: "Ultra-high I/O",
-  ESSD: "Extreme SSD",
-  GPSSD: "General Purpose SSD",
-  GPSSD2: "General Purpose SSD V2",
-};
+const DISK_TYPE_OPTIONS = [
+  { apiCode: "SATA", label: "Common I/O" },
+  { apiCode: "SAS", label: "High I/O" },
+  { apiCode: "SSD", label: "Ultra-high I/O" },
+  { apiCode: "ESSD", label: "Extreme SSD" },
+  { apiCode: "GPSSD", label: "General Purpose SSD" },
+  { apiCode: "GPSSD2.storage", label: "General Purpose SSD V2" },
+] as const;
+const DISK_TYPE_LABELS: Record<string, string> = Object.fromEntries(
+  DISK_TYPE_OPTIONS.map((option) => [option.apiCode, option.label]),
+);
 
 function isCatalogPricingMode(value: string): value is CatalogPricingMode {
   return PRICING_MODE_OPTIONS.some((option) => option.value === value);
@@ -607,10 +608,6 @@ function getFlavorSpec(flavor: ProductFlavor): string {
 function getDiskTypeDisplayName(diskType: string): string {
   const trimmed = diskType.trim();
   return DISK_TYPE_LABELS[trimmed] ?? trimmed;
-}
-
-function getDiskTypeLabel(disk: ProductDisk): string {
-  return getDiskTypeDisplayName(disk.resourceSpecCode);
 }
 
 function formatDiskLabel(diskType: string, diskSize: number): string {
@@ -1047,9 +1044,6 @@ export default function Home() {
         if (priceBody) {
           const vmProduct = priceBody.productInfos[0];
           const diskProduct = priceBody.productInfos[1];
-          if (typeof diskProduct?.resourceSpecCode === "string") {
-            setConfigDiskType(diskProduct.resourceSpecCode);
-          }
           if (typeof diskProduct?.resourceSize === "number") {
             setConfigDiskSize(String(diskProduct.resourceSize));
           }
@@ -1096,7 +1090,6 @@ export default function Home() {
 
   const normalizedCookie = extractMinimalCookie(cookie);
   const flavors = getCatalogFlavors(catalogResult?.response.body);
-  const catalogDisks = getCatalogDisks(catalogResult?.response.body);
   const deferredCatalogSearch = useDeferredValue(catalogSearch);
   const deferredSelectedCartKey = useDeferredValue(selectedCartKey);
   const cartsSorted = useMemo(() => {
@@ -1137,18 +1130,14 @@ export default function Home() {
   const paginatedCarts = cartsSorted.slice((cartPage - 1) * cartsPerPage, cartPage * cartsPerPage);
   const paginatedFlavors = filteredFlavors.slice((flavorPage - 1) * flavorsPerPage, flavorPage * flavorsPerPage);
   const catalogRegionOptions = useMemo(() => mergeCatalogRegions(catalogRegions, catalogRegion), [catalogRegion, catalogRegions]);
-  const configDiskTypeOptions = useMemo(() => {
-    return withCurrentOption(
-      [...new Set(catalogDisks.map((disk) => disk.resourceSpecCode.trim()).filter(Boolean))],
-      configDiskType,
-    );
-  }, [catalogDisks, configDiskType]);
-  const bulkDiskTypeOptions = useMemo(() => {
-    return withCurrentOption(
-      [...new Set(catalogDisks.map((disk) => disk.resourceSpecCode.trim()).filter(Boolean))],
-      bulkDiskType,
-    );
-  }, [bulkDiskType, catalogDisks]);
+  const configDiskTypeOptions = useMemo(() => withCurrentOption(
+    DISK_TYPE_OPTIONS.map((option) => option.apiCode),
+    configDiskType,
+  ), [configDiskType]);
+  const bulkDiskTypeOptions = useMemo(() => withCurrentOption(
+    DISK_TYPE_OPTIONS.map((option) => option.apiCode),
+    bulkDiskType,
+  ), [bulkDiskType]);
   const configHourOptions = withCurrentOption(getPricingDurationOptions(catalogPricingMode), configHours);
   const configQuantityOptions = withCurrentOption(CONFIG_QUANTITY_OPTIONS, configQuantity);
 
@@ -1160,26 +1149,6 @@ export default function Home() {
     ));
     setEstimateResult(null);
   }, [catalogPricingMode]);
-
-  useEffect(() => {
-    if (!catalogDisks.length) {
-      return;
-    }
-
-    const availableDiskCodes = catalogDisks
-      .map((disk) => disk.resourceSpecCode.trim())
-      .filter(Boolean);
-    const fallbackDiskType = availableDiskCodes.includes(DEFAULT_CATALOG_DISK_TYPE)
-      ? DEFAULT_CATALOG_DISK_TYPE
-      : availableDiskCodes[0] ?? DEFAULT_CATALOG_DISK_TYPE;
-
-    if (!availableDiskCodes.includes(configDiskType)) {
-      setConfigDiskType(fallbackDiskType);
-    }
-    if (!availableDiskCodes.includes(bulkDiskType)) {
-      setBulkDiskType(fallbackDiskType);
-    }
-  }, [bulkDiskType, catalogDisks, configDiskType]);
 
   useEffect(() => {
     setCartPage(1);
@@ -2511,14 +2480,11 @@ export default function Home() {
                         Disk type
                       </label>
                       <select className="field" id="config-disk-type" onChange={(event) => setConfigDiskType(event.target.value)} value={configDiskType}>
-                        {configDiskTypeOptions.map((option) => {
-                          const disk = catalogDisks.find((item) => item.resourceSpecCode === option);
-                          return (
-                            <option key={option} value={option}>
-                              {disk ? getDiskTypeLabel(disk) : getDiskTypeDisplayName(option)}
-                            </option>
-                          );
-                        })}
+                        {configDiskTypeOptions.map((option) => (
+                          <option key={option} value={option}>
+                            {getDiskTypeDisplayName(option)}
+                          </option>
+                        ))}
                       </select>
                     </div>
                     <div>
@@ -2637,14 +2603,11 @@ export default function Home() {
                         EVS type
                       </label>
                       <select className="field" id="bulk-disk-type" onChange={(event) => setBulkDiskType(event.target.value)} value={bulkDiskType}>
-                        {bulkDiskTypeOptions.map((option) => {
-                          const disk = catalogDisks.find((item) => item.resourceSpecCode === option);
-                          return (
-                            <option key={option} value={option}>
-                              {disk ? getDiskTypeLabel(disk) : getDiskTypeDisplayName(option)}
-                            </option>
-                          );
-                        })}
+                        {bulkDiskTypeOptions.map((option) => (
+                          <option key={option} value={option}>
+                            {getDiskTypeDisplayName(option)}
+                          </option>
+                        ))}
                       </select>
                     </div>
                     <div>
