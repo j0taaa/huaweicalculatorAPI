@@ -7,6 +7,9 @@ import {
   getDiskBasePrice,
   getEffectiveDiskPricingMode,
   getFlavorBasePrice,
+  getFlavorCpuCount,
+  getFlavorMemoryGb,
+  selectCheapestFlavorForRequirements,
   type ProductDisk,
   type ProductFlavor,
 } from "@/lib/catalog";
@@ -146,6 +149,53 @@ describe("catalog helpers", () => {
     });
 
     expect(flavors.map((flavor) => flavor.resourceSpecCode)).toEqual(["t6.medium.2"]);
+  });
+
+  test("getFlavorCpuCount and getFlavorMemoryGb read spec fields and fallback labels", () => {
+    expect(getFlavorCpuCount(makeFlavor("c6.large", {
+      productSpecSysDesc: "vCPUs:4CORE Memory:16384MB",
+    }))).toBe(4);
+    expect(getFlavorMemoryGb(makeFlavor("c6.large", {
+      productSpecSysDesc: "vCPUs:4CORE Memory:16384MB",
+    }))).toBe(16);
+
+    expect(getFlavorCpuCount(makeFlavor("c6.xlarge", {
+      cpu: "8 vCPU",
+    }))).toBe(8);
+    expect(getFlavorMemoryGb(makeFlavor("c6.xlarge", {
+      mem: "32 GB",
+    }))).toBe(32);
+  });
+
+  test("selectCheapestFlavorForRequirements picks the cheapest flavor that meets minimum specs", () => {
+    const flavors = [
+      makeFlavor("vm.small", {
+        productSpecSysDesc: "vCPUs:2CORE Memory:4096MB",
+        planList: [{ billingMode: "MONTHLY", amount: 45 }],
+      }),
+      makeFlavor("vm.medium", {
+        productSpecSysDesc: "vCPUs:2CORE Memory:8192MB",
+        planList: [{ billingMode: "MONTHLY", amount: 40 }],
+      }),
+      makeFlavor("vm.large", {
+        productSpecSysDesc: "vCPUs:4CORE Memory:16384MB",
+        planList: [{ billingMode: "MONTHLY", amount: 40 }],
+      }),
+      makeFlavor("vm.unpriced", {
+        productSpecSysDesc: "vCPUs:8CORE Memory:32768MB",
+      }),
+    ];
+
+    expect(selectCheapestFlavorForRequirements(flavors, {
+      pricingMode: "MONTHLY",
+      minVcpus: 2,
+      minRamGb: 8,
+    })?.resourceSpecCode).toBe("vm.medium");
+    expect(selectCheapestFlavorForRequirements(flavors, {
+      pricingMode: "MONTHLY",
+      minVcpus: 16,
+      minRamGb: 64,
+    })).toBeNull();
   });
 
   test("getDiskBasePrice prefers ONDEMAND disk plans", () => {

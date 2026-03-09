@@ -358,12 +358,74 @@ export function getFlavorBasePrice(flavor: ProductFlavor, pricingMode: CatalogPr
   return getCatalogItemBasePrice(flavor, pricingMode);
 }
 
+export function getFlavorCpuCount(flavor: ProductFlavor): number {
+  const spec = flavor.productSpecSysDesc ?? "";
+  const specMatch = spec.match(/vCPUs:(\d+)CORE/i);
+  if (specMatch) {
+    return Number.parseInt(specMatch[1], 10);
+  }
+
+  const cpuText = flavor.cpu ?? "";
+  const cpuMatch = cpuText.match(/(\d+)/);
+  return cpuMatch ? Number.parseInt(cpuMatch[1], 10) : 0;
+}
+
+export function getFlavorMemoryGb(flavor: ProductFlavor): number {
+  const spec = flavor.productSpecSysDesc ?? "";
+  const mbMatch = spec.match(/Memory:(\d+)MB/i);
+  if (mbMatch) {
+    return Number.parseInt(mbMatch[1], 10) / 1024;
+  }
+
+  const memText = flavor.mem ?? "";
+  const memMatch = memText.match(/(\d+(?:\.\d+)?)/);
+  return memMatch ? Number.parseFloat(memMatch[1]) : 0;
+}
+
 export function getDiskBasePrice(disk: ProductDisk, pricingMode: CatalogPricingMode = "ONDEMAND"): number {
   return getCatalogItemBasePrice(disk, pricingMode);
 }
 
 export function getEffectiveDiskPricingMode(pricingMode: CatalogPricingMode): CatalogPricingMode {
   return pricingMode === "RI" ? "ONDEMAND" : pricingMode;
+}
+
+export function selectCheapestFlavorForRequirements(
+  flavors: ProductFlavor[],
+  requirements: {
+    pricingMode: CatalogPricingMode;
+    minVcpus: number;
+    minRamGb: number;
+  },
+): ProductFlavor | null {
+  const minVcpus = Math.max(0, requirements.minVcpus);
+  const minRamGb = Math.max(0, requirements.minRamGb);
+
+  return flavors
+    .filter((flavor) => getFlavorCpuCount(flavor) >= minVcpus)
+    .filter((flavor) => getFlavorMemoryGb(flavor) >= minRamGb)
+    .filter((flavor) => Number.isFinite(getFlavorBasePrice(flavor, requirements.pricingMode)))
+    .sort((left, right) => {
+      const leftPrice = getFlavorBasePrice(left, requirements.pricingMode);
+      const rightPrice = getFlavorBasePrice(right, requirements.pricingMode);
+      if (leftPrice !== rightPrice) {
+        return leftPrice - rightPrice;
+      }
+
+      const leftCpu = getFlavorCpuCount(left);
+      const rightCpu = getFlavorCpuCount(right);
+      if (leftCpu !== rightCpu) {
+        return leftCpu - rightCpu;
+      }
+
+      const leftRam = getFlavorMemoryGb(left);
+      const rightRam = getFlavorMemoryGb(right);
+      if (leftRam !== rightRam) {
+        return leftRam - rightRam;
+      }
+
+      return left.resourceSpecCode.localeCompare(right.resourceSpecCode);
+    })[0] ?? null;
 }
 
 function shouldPreferFlavor(candidate: ProductFlavor, current: ProductFlavor): boolean {

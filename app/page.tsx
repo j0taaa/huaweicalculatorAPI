@@ -7,6 +7,9 @@ import {
   getCatalogDisks,
   getCatalogFlavors,
   getFlavorBasePrice,
+  getFlavorCpuCount,
+  getFlavorMemoryGb,
+  selectCheapestFlavorForRequirements,
   type CatalogPricingMode,
   type PriceResponseBody,
   type ProductDisk,
@@ -221,6 +224,33 @@ type CalculatorItem = {
   totalAmount: number;
   originalAmount: number;
   payload: CalculatorCartItemPayload;
+};
+
+type BulkEcsRequest = {
+  name: string;
+  vcpus: number;
+  ram: number;
+};
+
+type BulkEcsMatch = {
+  request: BulkEcsRequest;
+  flavorCode: string;
+  matchedVcpus: number;
+  matchedRamGb: number;
+  totalAmount: number;
+  currency: string;
+};
+
+type CalculatorItemConfig = {
+  id?: string;
+  region: string;
+  quantity: number;
+  durationValue: number;
+  pricingMode: CatalogPricingMode;
+  diskType: string;
+  diskSize: number;
+  title: string;
+  description: string;
 };
 
 type EditorTarget =
@@ -487,33 +517,74 @@ function extractMinimalCookie(input: string): string {
   return trimmed;
 }
 
+function parseBulkEcsRequests(input: string): BulkEcsRequest[] {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    throw new Error("Paste at least one ECS request");
+  }
+
+  const tryParse = (value: string) => JSON.parse(value) as unknown;
+  let parsed: unknown;
+
+  try {
+    parsed = tryParse(trimmed);
+  } catch {
+    const normalized = trimmed
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|\s)\/\/.*$/gm, "")
+      .replace(/([{,]\s*)([A-Za-z_$][\w$]*)(\s*:)/g, "$1\"$2\"$3")
+      .replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, (_, value: string) => `"${value.replace(/\"/g, '"').replace(/"/g, '\\"')}"`)
+      .replace(/,\s*([}\]])/g, "$1");
+    parsed = tryParse(normalized);
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new Error("The ECS input must be an array of objects");
+  }
+
+  return parsed.map((entry, index) => {
+    if (!entry || typeof entry !== "object") {
+      throw new Error(`ECS item ${index + 1} must be an object`);
+    }
+
+    const candidate = entry as Record<string, unknown>;
+    const name = typeof candidate.name === "string" ? candidate.name.trim() : "";
+    const vcpus = typeof candidate.vcpus === "number" ? candidate.vcpus : Number(candidate.vcpus);
+    const ram = typeof candidate.ram === "number" ? candidate.ram : Number(candidate.ram);
+
+    if (!name) {
+      throw new Error(`ECS item ${index + 1} is missing a name`);
+    }
+    if (!Number.isFinite(vcpus) || vcpus <= 0) {
+      throw new Error(`ECS item ${index + 1} must include a positive vcpus value`);
+    }
+    if (!Number.isFinite(ram) || ram <= 0) {
+      throw new Error(`ECS item ${index + 1} must include a positive ram value`);
+    }
+
+    return {
+      name,
+      vcpus,
+      ram,
+    };
+  });
+}
+
+function isCatalogLoadedForRegion(result: CatalogCacheResult | null, region: string): boolean {
+  return result?.cache?.region?.trim() === region.trim();
+}
+
 function getFlavorLabel(flavor: ProductFlavor): string {
   const bits = [flavor.cpu, flavor.mem, flavor.performType].filter(Boolean);
   return bits.length ? bits.join(" / ") : flavor.resourceSpecCode;
 }
 
-function getFlavorCpuCount(flavor: ProductFlavor): number {
-  const spec = flavor.productSpecSysDesc ?? "";
-  const specMatch = spec.match(/vCPUs:(\d+)CORE/i);
-  if (specMatch) {
-    return Number.parseInt(specMatch[1], 10);
+function createCalculatorItemId(flavorCode: string): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
   }
 
-  const cpuText = flavor.cpu ?? "";
-  const cpuMatch = cpuText.match(/(\d+)/);
-  return cpuMatch ? Number.parseInt(cpuMatch[1], 10) : 0;
-}
-
-function getFlavorMemoryGb(flavor: ProductFlavor): number {
-  const spec = flavor.productSpecSysDesc ?? "";
-  const mbMatch = spec.match(/Memory:(\d+)MB/i);
-  if (mbMatch) {
-    return Number.parseInt(mbMatch[1], 10) / 1024;
-  }
-
-  const memText = flavor.mem ?? "";
-  const memMatch = memText.match(/(\d+(?:\.\d+)?)/);
-  return memMatch ? Number.parseFloat(memMatch[1]) : 0;
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}-${flavorCode}`;
 }
 
 function getFlavorSpec(flavor: ProductFlavor): string {
@@ -843,6 +914,34 @@ function buildCalculatorItemPayload(
   return payload;
 }
 
+function buildCalculatorItem(
+  sampleItem: CalculatorCartItemPayload,
+  flavor: ProductFlavor,
+  priceResponse: PriceResponseBody,
+  config: CalculatorItemConfig,
+): CalculatorItem {
+  const payload = buildCalculatorItemPayload(sampleItem, flavor, priceResponse, config);
+
+  return {
+    id: config.id ?? createCalculatorItemId(flavor.resourceSpecCode),
+    title: config.title,
+    description: config.description,
+    region: config.region,
+    quantity: config.quantity,
+    hours: config.durationValue,
+    pricingMode: config.pricingMode,
+    diskPricingMode: getEffectiveDiskPricingMode(config.pricingMode),
+    durationUnit: getPricingDurationUnit(config.pricingMode),
+    diskType: config.diskType,
+    diskSize: config.diskSize,
+    flavorCode: flavor.resourceSpecCode,
+    currency: priceResponse.currency ?? "USD",
+    totalAmount: priceResponse.amount,
+    originalAmount: priceResponse.originalAmount,
+    payload,
+  };
+}
+
 export default function Home() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(true);
@@ -886,6 +985,13 @@ export default function Home() {
   const [configQuantity, setConfigQuantity] = useState("1");
   const [configTitle, setConfigTitle] = useState("Elastic Cloud Server");
   const [configDescription, setConfigDescription] = useState("Generated from the custom calculator");
+  const [bulkEcsInput, setBulkEcsInput] = useState(`[
+  { name: "VM 1vCPU 16GB", vcpus: 1, ram: 16 },
+  { name: "VM 2vCPU 4GB", vcpus: 2, ram: 4 }
+]`);
+  const [bulkMatchLoading, setBulkMatchLoading] = useState(false);
+  const [bulkMatchSummary, setBulkMatchSummary] = useState("");
+  const [bulkMatchResults, setBulkMatchResults] = useState<BulkEcsMatch[]>([]);
 
   const [estimateLoading, setEstimateLoading] = useState(false);
   const [estimateResult, setEstimateResult] = useState<ReplayResult | null>(null);
@@ -1226,6 +1332,160 @@ export default function Home() {
     }
   }
 
+  async function buildBulkCalculatorItems() {
+    const editTemplate = findTemplate(templates, "edit-cart");
+    if (!editTemplate || typeof editTemplate.bodyJson !== "object" || !editTemplate.bodyJson) {
+      setAppError("Edit cart template is missing");
+      return null;
+    }
+
+    const requests = parseBulkEcsRequests(bulkEcsInput);
+    const nextRegion = catalogRegion.trim() || DEFAULT_REGION;
+    const pricingCatalog = isCatalogLoadedForRegion(catalogResult, nextRegion) && catalogResult
+      ? catalogResult
+      : await fetchCatalogFromCache(nextRegion);
+    const nextFlavors = getCatalogFlavors(pricingCatalog.response.body);
+    const sampleBody = editTemplate.bodyJson as EditCartPayload;
+    const sampleItem = sampleBody.cartListData[0];
+
+    if (!sampleItem) {
+      throw new Error("Edit cart template does not include a sample ECS item");
+    }
+
+    const quantity = Number.parseInt(configQuantity, 10) || 1;
+    const durationValue = getNormalizedDurationValue(catalogPricingMode, configHours);
+    const diskType = configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE;
+    const diskSize = Number.parseInt(configDiskSize, 10) || 40;
+    const descriptionBase = configDescription.trim() || "Generated from the custom calculator";
+    const matchedItems = requests.map((request) => {
+      const flavor = selectCheapestFlavorForRequirements(nextFlavors, {
+        pricingMode: catalogPricingMode,
+        minVcpus: request.vcpus,
+        minRamGb: request.ram,
+      });
+
+      if (!flavor) {
+        throw new Error(
+          `No ${getPricingModeLabel(catalogPricingMode)} ECS in ${nextRegion} matches ${request.name} (${request.vcpus} vCPU / ${request.ram} GB RAM)`,
+        );
+      }
+
+      const estimate = buildCatalogPriceEstimate(pricingCatalog.response.body, {
+        flavorCode: flavor.resourceSpecCode,
+        diskType,
+        diskSize,
+        durationValue,
+        quantity,
+        pricingMode: catalogPricingMode,
+      });
+
+      if (!estimate) {
+        throw new Error(
+          `Cached ${getPricingModeLabel(catalogPricingMode)} pricing is unavailable for ${flavor.resourceSpecCode} in ${nextRegion}`,
+        );
+      }
+
+      const description = `${descriptionBase} - minimum ${request.vcpus} vCPU / ${request.ram} GB RAM`;
+      const item = buildCalculatorItem(sampleItem, flavor, estimate, {
+        region: nextRegion,
+        quantity,
+        durationValue,
+        pricingMode: catalogPricingMode,
+        diskType,
+        diskSize,
+        title: request.name,
+        description,
+      });
+
+      return {
+        item,
+        match: {
+          request,
+          flavorCode: flavor.resourceSpecCode,
+          matchedVcpus: getFlavorCpuCount(flavor),
+          matchedRamGb: getFlavorMemoryGb(flavor),
+          totalAmount: estimate.amount,
+          currency: estimate.currency ?? "USD",
+        } satisfies BulkEcsMatch,
+      };
+    });
+
+    setCatalogResult(pricingCatalog);
+    setCatalogRegions((current) => mergeCatalogRegions(pricingCatalog.regions ?? current, nextRegion));
+    setCatalogRegion(nextRegion);
+    if (matchedItems[0]) {
+      setSelectedFlavorCode(matchedItems[0].item.flavorCode);
+    }
+
+    return {
+      items: matchedItems.map((entry) => entry.item),
+      matches: matchedItems.map((entry) => entry.match),
+      region: nextRegion,
+    };
+  }
+
+  async function addBulkMatchesToDraft() {
+    setBulkMatchLoading(true);
+    setAppError("");
+
+    try {
+      const resolved = await buildBulkCalculatorItems();
+      if (!resolved) {
+        return;
+      }
+
+      setCalculatorItems((current) => [...current, ...resolved.items]);
+      setBulkMatchResults(resolved.matches);
+      setBulkMatchSummary(`Added ${resolved.items.length} matched ECS items to the draft queue.`);
+    } catch (error) {
+      setBulkMatchResults([]);
+      setBulkMatchSummary("");
+      setAppError(error instanceof Error ? error.message : "Failed to match the ECS list");
+    } finally {
+      setBulkMatchLoading(false);
+    }
+  }
+
+  async function appendBulkMatchesToSelectedCart() {
+    if (!selectedCartKey.trim()) {
+      setAppError("Select or create a Huawei cart first");
+      return;
+    }
+
+    setBulkMatchLoading(true);
+    setAppError("");
+
+    try {
+      const resolved = await buildBulkCalculatorItems();
+      if (!resolved) {
+        return;
+      }
+
+      const detail = currentCartDetail ?? await loadCartDetail(selectedCartKey.trim(), false);
+      if (!detail) {
+        throw new Error("Load the selected cart before appending ECS matches");
+      }
+
+      const nextItems = [
+        ...(detail.cartListData ?? []).map((item) => cloneJson(item as CalculatorCartItemPayload)),
+        ...resolved.items.map((item) => cloneJson(item.payload)),
+      ];
+
+      const result = await updateLiveCartItems(nextItems);
+      if (result) {
+        setCalculatorItems((current) => [...current, ...resolved.items]);
+        setBulkMatchResults(resolved.matches);
+        setBulkMatchSummary(`Added ${resolved.items.length} matched ECS items to ${selectedCartName.trim() || "the selected cart"}.`);
+      }
+    } catch (error) {
+      setBulkMatchResults([]);
+      setBulkMatchSummary("");
+      setAppError(error instanceof Error ? error.message : "Failed to append the ECS list to the selected cart");
+    } finally {
+      setBulkMatchLoading(false);
+    }
+  }
+
   function populateEditorFromDraftItem(item: CalculatorItem) {
     setEditorTarget({ kind: "draft", id: item.id });
     setCatalogPricingMode(item.pricingMode);
@@ -1377,7 +1637,8 @@ export default function Home() {
     const durationValue = getNormalizedDurationValue(catalogPricingMode, configHours);
     const diskSize = Number.parseInt(configDiskSize, 10) || 40;
 
-    const payload = buildCalculatorItemPayload(sampleItem, selectedFlavor, estimateBody, {
+    const item = buildCalculatorItem(sampleItem, selectedFlavor, estimateBody, {
+      id: editingDraftItem?.id,
       region: catalogRegion.trim() || DEFAULT_REGION,
       quantity,
       durationValue,
@@ -1387,25 +1648,6 @@ export default function Home() {
       title: configTitle.trim() || selectedFlavor.resourceSpecCode,
       description: configDescription.trim() || "Generated from the custom calculator",
     });
-
-    const item: CalculatorItem = {
-      id: editingDraftItem?.id ?? `${Date.now()}-${selectedFlavor.resourceSpecCode}`,
-      title: configTitle.trim() || selectedFlavor.resourceSpecCode,
-      description: configDescription.trim() || "Generated from the custom calculator",
-      region: catalogRegion.trim() || DEFAULT_REGION,
-      quantity,
-      hours: durationValue,
-      pricingMode: catalogPricingMode,
-      diskPricingMode: getEffectiveDiskPricingMode(catalogPricingMode),
-      durationUnit: getPricingDurationUnit(catalogPricingMode),
-      diskType: configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
-      diskSize,
-      flavorCode: selectedFlavor.resourceSpecCode,
-      currency: estimateBody.currency ?? "USD",
-      totalAmount: estimateBody.amount,
-      originalAmount: estimateBody.originalAmount,
-      payload,
-    };
 
     setCalculatorItems((current) => {
       if (!editingDraftItem) {
@@ -2308,6 +2550,65 @@ export default function Home() {
                         <p className="metric-label">Line items</p>
                         <p className="metric-value">{estimateBody.productRatingResult?.length ?? 0}</p>
                       </div>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="soft-panel lg:col-span-2">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="section-title">Bulk ECS matcher</p>
+                      <p className="mt-2 text-sm text-slate-600">
+                        Paste a list of ECS requirements. The calculator picks the cheapest flavor in <code>{catalogRegion}</code>
+                        that meets each minimum using {getPricingModeLabel(catalogPricingMode)} pricing.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <span className="pill">Region: {catalogRegion}</span>
+                      <span className="pill">Billing: {getPricingModeLabel(catalogPricingMode)}</span>
+                      <span className="pill">Cart: {selectedCartName || "Unset"}</span>
+                    </div>
+                  </div>
+
+                  <label className="label mt-4" htmlFor="bulk-ecs-input">
+                    ECS list
+                  </label>
+                  <textarea
+                    className="field h-40 font-mono text-sm"
+                    id="bulk-ecs-input"
+                    onChange={(event) => setBulkEcsInput(event.target.value)}
+                    spellCheck={false}
+                    value={bulkEcsInput}
+                  />
+
+                  <p className="mt-3 text-sm text-slate-500">
+                    Uses the current quantity, duration, disk type, and disk size from this step for every matched ECS.
+                  </p>
+
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <button className="btn btn-primary" disabled={bulkMatchLoading || loadingTemplates} onClick={() => void addBulkMatchesToDraft()} type="button">
+                      {bulkMatchLoading ? "Matching..." : "Add matched ECS list to draft"}
+                    </button>
+                    <button className="btn btn-secondary" disabled={bulkMatchLoading || loadingTemplates || !selectedCartKey.trim()} onClick={() => void appendBulkMatchesToSelectedCart()} type="button">
+                      {bulkMatchLoading ? "Matching..." : "Add matched ECS list to selected cart"}
+                    </button>
+                  </div>
+
+                  {bulkMatchSummary ? (
+                    <div className="result-strip mt-4">
+                      <p className="font-semibold text-slate-900">{bulkMatchSummary}</p>
+                      {bulkMatchResults.length ? (
+                        <div className="mt-3 space-y-2">
+                          {bulkMatchResults.map((match, index) => (
+                            <div key={`${match.request.name}-${match.flavorCode}-${index}`} className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-700">
+                              <span>
+                                {match.request.name} - {match.flavorCode} ({match.matchedVcpus} vCPU / {match.matchedRamGb.toFixed(0)} GB)
+                              </span>
+                              <span className="pill">{match.totalAmount.toFixed(2)} {match.currency}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
