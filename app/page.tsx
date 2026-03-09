@@ -607,6 +607,51 @@ function buildCartTotalPrice(items: CalculatorCartItemPayload[]) {
   };
 }
 
+function PencilIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path
+        d="M4 20h4l10-10-4-4L4 16v4Zm3.5-2.5H6.5v-1l8.56-8.56 1 1L7.5 17.5ZM16.06 7.94l-1-1 1.22-1.22a1 1 0 0 1 1.41 0l.59.59a1 1 0 0 1 0 1.41l-1.22 1.22Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path
+        d="M9 3h6l1 2h4v2H4V5h4l1-2Zm1 6h2v8h-2V9Zm4 0h2v8h-2V9ZM7 9h2v8H7V9Zm1 11a2 2 0 0 1-2-2V8h12v10a2 2 0 0 1-2 2H8Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function SpinnerIcon() {
+  return (
+    <svg aria-hidden="true" className="icon-spin" fill="none" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" opacity="0.2" r="9" stroke="currentColor" strokeWidth="2" />
+      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+    </svg>
+  );
+}
+
+function buildCartMutationUrl(template: Template, action: "update" | "delete", key: string): string {
+  const nextUrl = action === "update"
+    ? template.url
+    : template.url.replace("/share/update", "/share/delete");
+
+  if (!nextUrl.includes(`/share/${action}`)) {
+    throw new Error(`The ${action} cart endpoint could not be derived from the edit cart template`);
+  }
+
+  const url = new URL(nextUrl);
+  url.searchParams.set("key", key.trim());
+  return url.toString();
+}
+
 function buildBuyUrl(
   baseUrl: string,
   region: string,
@@ -814,6 +859,7 @@ export default function Home() {
   const [newCartName, setNewCartName] = useState("Team proposal cart");
   const [cartLoading, setCartLoading] = useState(false);
   const [createCartLoading, setCreateCartLoading] = useState(false);
+  const [cartAction, setCartAction] = useState<"rename" | "delete" | null>(null);
   const [cartPage, setCartPage] = useState(1);
   const [cartDetailLoading, setCartDetailLoading] = useState(false);
   const [cartDetailError, setCartDetailError] = useState("");
@@ -1392,18 +1438,13 @@ export default function Home() {
 
     try {
       const base = cloneJson(template.bodyJson as EditCartPayload);
-      const totalPrice = buildCartTotalPrice(nextItems);
-
       base.name = selectedCartName.trim() || currentCartDetail?.name || "Calculator cart";
       base.billingMode = currentCartDetail?.billingMode || base.billingMode;
       base.cartListData = nextItems.map((item) => cloneJson(item));
-      base.totalPrice = totalPrice;
-
-      const url = new URL(template.url);
-      url.searchParams.set("key", selectedCartKey.trim());
+      base.totalPrice = buildCartTotalPrice(base.cartListData);
 
       const result = await replayOne("edit-cart", {
-        url: url.toString(),
+        url: buildCartMutationUrl(template, "update", selectedCartKey.trim()),
         bodyRaw: JSON.stringify(base),
       });
 
@@ -1425,6 +1466,126 @@ export default function Home() {
       return null;
     } finally {
       setPublishLoading(false);
+    }
+  }
+
+  async function renameSelectedCart() {
+    const template = findTemplate(templates, "edit-cart");
+    if (!template || typeof template.bodyJson !== "object" || !template.bodyJson) {
+      setAppError("Edit cart template is missing");
+      return;
+    }
+
+    const trimmedKey = selectedCartKey.trim();
+    const trimmedName = selectedCartName.trim();
+    if (!trimmedKey) {
+      setAppError("Select or create a Huawei cart first");
+      return;
+    }
+
+    if (!trimmedName) {
+      setAppError("Enter a cart name before renaming it");
+      return;
+    }
+
+    setCartAction("rename");
+    setAppError("");
+
+    try {
+      const detail = currentCartDetail ?? await loadCartDetail(trimmedKey, false);
+      if (!detail) {
+        throw new Error("Load the selected cart before renaming it");
+      }
+
+      const nextPayload: EditCartPayload = {
+        billingMode: detail.billingMode || "cart.shareList.billingModeTotal",
+        cartListData: (detail.cartListData ?? []).map((item) => cloneJson(item as CalculatorCartItemPayload)),
+        name: trimmedName,
+        totalPrice: buildCartTotalPrice((detail.cartListData ?? []).map((item) => cloneJson(item as CalculatorCartItemPayload))),
+      };
+
+      const result = await replayOne("edit-cart", {
+        url: buildCartMutationUrl(template, "update", trimmedKey),
+        bodyRaw: JSON.stringify(nextPayload),
+      });
+
+      setPublishResult(result);
+      setCartDetailCache((current) => ({
+        ...current,
+        [trimmedKey]: {
+          billingMode: nextPayload.billingMode,
+          cartListData: nextPayload.cartListData,
+          name: nextPayload.name,
+          totalPrice: nextPayload.totalPrice,
+        },
+      }));
+      setCarts((current) => current.map((cart) => (
+        cart.key === trimmedKey
+          ? {
+              ...cart,
+              billingMode: nextPayload.billingMode,
+              name: nextPayload.name,
+              totalPrice: nextPayload.totalPrice,
+              updateTime: Date.now(),
+            }
+          : cart
+      )));
+      await refreshCarts();
+      await loadCartDetail(trimmedKey, true);
+    } catch (error) {
+      setAppError(error instanceof Error ? error.message : "Failed to rename cart");
+    } finally {
+      setCartAction(null);
+    }
+  }
+
+  async function deleteSelectedCart() {
+    const template = findTemplate(templates, "edit-cart");
+    if (!template || typeof template.bodyJson !== "object" || !template.bodyJson) {
+      setAppError("Edit cart template is missing");
+      return;
+    }
+
+    const trimmedKey = selectedCartKey.trim();
+    if (!trimmedKey) {
+      setAppError("Select or create a Huawei cart first");
+      return;
+    }
+
+    const confirmed = window.confirm(`Delete ${selectedCartName.trim() || "this cart"}? This cannot be undone.`);
+    if (!confirmed) {
+      return;
+    }
+
+    setCartAction("delete");
+    setAppError("");
+
+    try {
+      const result = await replayOne("edit-cart", {
+        url: buildCartMutationUrl(template, "delete", trimmedKey),
+        bodyRaw: "",
+      });
+
+      setPublishResult(result);
+      setCarts((current) => current.filter((cart) => cart.key !== trimmedKey));
+      setCartDetailCache((current) => {
+        const next = { ...current };
+        delete next[trimmedKey];
+        return next;
+      });
+      setEditorTarget((current) => (current?.kind === "remote" ? null : current));
+      setCartDetailError("");
+      setCartDetailResult(null);
+
+      const fallbackCart = cartsSorted.find((cart) => cart.key !== trimmedKey);
+      setSelectedCartKey(fallbackCart?.key ?? "");
+      setSelectedCartName(fallbackCart?.name ?? "");
+
+      await refreshCarts();
+    } catch (error) {
+      setAppError(error instanceof Error ? error.message : "Failed to delete cart");
+    } finally {
+      setCartAction(null);
     }
   }
 
@@ -1620,7 +1781,31 @@ export default function Home() {
               </div>
 
               <div className="soft-panel mt-4">
-                <p className="section-title">Current selection</p>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="section-title">Current selection</p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      aria-label="Rename selected cart"
+                      className="icon-btn"
+                      disabled={!selectedCartKey.trim() || !selectedCartName.trim() || cartAction !== null}
+                      onClick={() => void renameSelectedCart()}
+                      title="Rename selected cart"
+                      type="button"
+                    >
+                      {cartAction === "rename" ? <SpinnerIcon /> : <PencilIcon />}
+                    </button>
+                    <button
+                      aria-label="Delete selected cart"
+                      className="icon-btn icon-btn-danger"
+                      disabled={!selectedCartKey.trim() || cartAction !== null}
+                      onClick={() => void deleteSelectedCart()}
+                      title="Delete selected cart"
+                      type="button"
+                    >
+                      {cartAction === "delete" ? <SpinnerIcon /> : <TrashIcon />}
+                    </button>
+                  </div>
+                </div>
                 <label className="label mt-3" htmlFor="selected-cart-name">
                   Cart name
                 </label>

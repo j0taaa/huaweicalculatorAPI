@@ -269,6 +269,51 @@ pre,
   font-size: 0.82rem;
 }
 
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.45rem;
+  height: 2.45rem;
+  border-radius: 0.9rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(255, 255, 255, 0.92);
+  color: #334155;
+  transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.icon-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(29, 78, 216, 0.3);
+  background: rgba(239, 246, 255, 0.92);
+}
+
+.icon-btn svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.icon-btn-danger {
+  color: #b91c1c;
+  border-color: rgba(220, 38, 38, 0.18);
+  background: rgba(254, 242, 242, 0.95);
+}
+
+.icon-btn-danger:hover:not(:disabled) {
+  border-color: rgba(220, 38, 38, 0.28);
+  background: rgba(254, 226, 226, 0.98);
+}
+
+.icon-spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .btn-danger {
   border: 1px solid rgba(220, 38, 38, 0.18);
   background: rgba(254, 242, 242, 0.95);
