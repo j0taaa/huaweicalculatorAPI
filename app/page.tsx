@@ -18,10 +18,22 @@ import {
   type ProductFlavor,
 } from "@/lib/catalog";
 import {
+  BRAZIL_REGION,
+  buildDuplicateCartName,
+  getDefaultBillingConversionTarget,
+  getDefaultRegionConversionTarget,
+  getDominantCartRegion,
+  SANTIAGO_REGION,
+} from "@/lib/cart-conversion";
+import {
   DISK_TYPE_OPTIONS,
   getDiskTypeDisplayName,
   normalizeDiskTypeApiCode,
 } from "@/lib/disk-types";
+import {
+  buildEcsSystemDiskPayload,
+  getEcsSystemDiskStepperType,
+} from "@/lib/ecs-payload";
 import {
   buildEvsBuyUrl,
   buildEvsDiskPayloadFields,
@@ -191,6 +203,8 @@ type RemoteCartItem = {
   diskSize: number;
   diskLabel: string;
   resourceCode: string;
+  vcpus: number;
+  ramGb: number;
   totalAmount: number;
   originalAmount: number;
   payload: CalculatorCartItemPayload;
@@ -310,7 +324,7 @@ const CONFIG_HOUR_OPTIONS = ["24", "168", "360", "720", "744"];
 const CONFIG_MONTH_OPTIONS = ["1", "3", "6", "12", "24", "36"];
 const CONFIG_YEAR_OPTIONS = ["1", "2", "3"];
 const CONFIG_QUANTITY_OPTIONS = ["1", "2", "3", "5", "10"];
-const DEFAULT_REGION = "sa-brazil-1";
+const DEFAULT_REGION = BRAZIL_REGION;
 const DEFAULT_CATALOG_DISK_TYPE = "SAS";
 const DEFAULT_CATALOG_DISK_SIZE = "40";
 const DEFAULT_SERVICE: CalculatorService = "ecs";
@@ -327,6 +341,10 @@ const PRICING_MODE_OPTIONS: Array<{ value: CatalogPricingMode; label: string }> 
 const SERVICE_OPTIONS: Array<{ value: CalculatorService; label: string; description: string }> = [
   { value: "ecs", label: "ECS", description: "Elastic Cloud Server" },
   { value: "evs", label: "EVS", description: "Elastic Volume Service" },
+];
+const BILLING_CONVERSION_OPTIONS: Array<{ value: "ONDEMAND" | "RI"; label: string }> = [
+  { value: "ONDEMAND", label: "Pay-per-use ECS" },
+  { value: "RI", label: "RI ECS (1 year)" },
 ];
 
 function isCatalogPricingMode(value: string): value is CatalogPricingMode {
@@ -779,6 +797,7 @@ function getRemoteCartItems(detail: ShareCartDetail | null): RemoteCartItem[] {
     const title = storedDescription
       || (service === "ecs" ? resourceCode : formatDiskLabel(diskType, diskSize))
       || `Item ${index + 1}`;
+    const vmFlavor = vmInfo as ProductFlavor;
 
     return {
       id: `${service}-${resourceCode}-${index}`,
@@ -798,6 +817,8 @@ function getRemoteCartItems(detail: ShareCartDetail | null): RemoteCartItem[] {
       diskSize,
       diskLabel: formatDiskLabel(diskType, diskSize),
       resourceCode,
+      vcpus: service === "ecs" ? getFlavorCpuCount(vmFlavor) : 0,
+      ramGb: service === "ecs" ? getFlavorMemoryGb(vmFlavor) : 0,
       totalAmount: selectedProduct.amount ?? 0,
       originalAmount: selectedProduct.originalAmount ?? selectedProduct.amount ?? 0,
       payload: cloneJson(item as CalculatorCartItemPayload),
@@ -894,6 +915,7 @@ function buildEcsBuyUrl(
 function buildEcsCalculatorItemPayload(
   sampleItem: CalculatorCartItemPayload,
   flavor: ProductFlavor,
+  disk: ProductDisk,
   priceResponse: PriceResponseBody,
   config: EcsCalculatorItemConfig,
 ): CalculatorCartItemPayload {
@@ -932,7 +954,7 @@ function buildEcsCalculatorItemPayload(
 
   const evsStepper = (templateRender.calculator_evs_stepper as Record<string, unknown>) ?? {};
   const evsMain = (evsStepper.calculator_evs_stepper_main as Record<string, unknown>) ?? {};
-  evsMain.type = config.diskType;
+  evsMain.type = getEcsSystemDiskStepperType(disk, diskInfo);
   evsMain.UNSET_Stepper_0 = {
     measureId: 17,
     measureValue: config.diskSize,
@@ -1025,30 +1047,15 @@ function buildEcsCalculatorItemPayload(
     durationNum: config.durationValue,
   };
 
-  productAllInfos[2] = {
-    ...diskInfo,
-    resourceSpecCode: config.diskType,
-    resourceSpecType: config.diskType,
-    resourceSize: config.diskSize,
-    productNum: config.quantity,
-    selfProductNum: config.quantity,
-    billingMode: diskPricingMode,
-    usageValue: config.durationValue,
-    inquiryResult: {
-      ...(diskInfo.inquiryResult as Record<string, unknown>),
-      id: diskRating?.id ?? (diskInfo.inquiryResult as Record<string, unknown>)?.id,
-      productId: diskRating?.productId ?? diskInfo.productId,
-      amount: diskRating?.amount ?? diskInfo.amount,
-      discountAmount: diskRating?.discountAmount ?? 0,
-      originalAmount: diskRating?.originalAmount ?? diskInfo.originalAmount ?? diskInfo.amount,
-      perAmount: null,
-      perDiscountAmount: null,
-      perOriginalAmount: null,
-      perPeriodType: null,
-      measureId: 1,
-      extendParams: null,
-    },
-  };
+  productAllInfos[2] = buildEcsSystemDiskPayload({
+    existingDiskInfo: diskInfo,
+    disk,
+    diskSize: config.diskSize,
+    quantity: config.quantity,
+    durationValue: config.durationValue,
+    pricingMode: config.pricingMode,
+    diskRating,
+  });
 
   selectedProduct.productAllInfos = productAllInfos;
   payload.selectedProduct = selectedProduct;
@@ -1248,10 +1255,11 @@ function buildEvsCalculatorItemPayload(
 function buildEcsCalculatorItem(
   sampleItem: CalculatorCartItemPayload,
   flavor: ProductFlavor,
+  disk: ProductDisk,
   priceResponse: PriceResponseBody,
   config: EcsCalculatorItemConfig,
 ): CalculatorItem {
-  const payload = buildEcsCalculatorItemPayload(sampleItem, flavor, priceResponse, config);
+  const payload = buildEcsCalculatorItemPayload(sampleItem, flavor, disk, priceResponse, config);
 
   return {
     id: config.id ?? createCalculatorItemId(flavor.resourceSpecCode),
@@ -1320,11 +1328,15 @@ export default function Home() {
   const [cartLoading, setCartLoading] = useState(false);
   const [createCartLoading, setCreateCartLoading] = useState(false);
   const [cartAction, setCartAction] = useState<"rename" | "delete" | null>(null);
+  const [conversionAction, setConversionAction] = useState<"billing" | "region" | null>(null);
+  const [conversionSummary, setConversionSummary] = useState("");
   const [cartPage, setCartPage] = useState(1);
   const [cartDetailLoading, setCartDetailLoading] = useState(false);
   const [cartDetailError, setCartDetailError] = useState("");
   const [cartDetailResult, setCartDetailResult] = useState<CartDetailResult | null>(null);
   const [cartDetailCache, setCartDetailCache] = useState<Record<string, ShareCartDetail>>({});
+  const [billingConversionMode, setBillingConversionMode] = useState<"ONDEMAND" | "RI">("RI");
+  const [regionConversionTarget, setRegionConversionTarget] = useState(DEFAULT_REGION);
 
   const [catalogRegion, setCatalogRegion] = useState(DEFAULT_REGION);
   const [catalogRegions, setCatalogRegions] = useState<CatalogRegion[]>([
@@ -1481,6 +1493,7 @@ export default function Home() {
   const currentCartDetail = selectedCartKey ? cartDetailCache[selectedCartKey] ?? null : null;
   const remoteCartItems = useMemo(() => getRemoteCartItems(currentCartDetail), [currentCartDetail]);
   const remoteCartTotal = currentCartDetail?.totalPrice?.amount ?? remoteCartItems.reduce((sum, item) => sum + item.totalAmount, 0);
+  const dominantCartRegion = useMemo(() => getDominantCartRegion(remoteCartItems), [remoteCartItems]);
   const editingDraftItem = editorTarget?.kind === "draft" ? calculatorItems.find((item) => item.id === editorTarget.id) ?? null : null;
   const editingRemoteItem = editorTarget?.kind === "remote" ? remoteCartItems.find((item) => item.id === editorTarget.id) ?? null : null;
   const cartsPerPage = 6;
@@ -1490,6 +1503,10 @@ export default function Home() {
   const paginatedCarts = cartsSorted.slice((cartPage - 1) * cartsPerPage, cartPage * cartsPerPage);
   const paginatedFlavors = filteredFlavors.slice((flavorPage - 1) * flavorsPerPage, flavorPage * flavorsPerPage);
   const catalogRegionOptions = useMemo(() => mergeCatalogRegions(catalogRegions, catalogRegion), [catalogRegion, catalogRegions]);
+  const regionConversionOptions = useMemo(
+    () => mergeCatalogRegions(catalogRegions, dominantCartRegion, BRAZIL_REGION, SANTIAGO_REGION, regionConversionTarget),
+    [catalogRegions, dominantCartRegion, regionConversionTarget],
+  );
   const serviceOptions = SERVICE_OPTIONS;
   const configDiskTypeOptions = useMemo(() => withCurrentOption(
     DISK_TYPE_OPTIONS.map((option) => option.apiCode),
@@ -1546,6 +1563,12 @@ export default function Home() {
     }
   }, [flavorPage, totalFlavorPages]);
 
+  useEffect(() => {
+    setBillingConversionMode(getDefaultBillingConversionTarget(remoteCartItems));
+    setRegionConversionTarget(getDefaultRegionConversionTarget(dominantCartRegion || DEFAULT_REGION));
+    setConversionSummary("");
+  }, [dominantCartRegion, remoteCartItems, selectedCartKey]);
+
   async function replayOne(
     id: string,
     options?: {
@@ -1591,13 +1614,17 @@ export default function Home() {
   }
 
   async function fetchEvsCatalog(region: string): Promise<CatalogCacheResult> {
+    return fetchRemoteCatalog(region, "evs");
+  }
+
+  async function fetchRemoteCatalog(region: string, service: CalculatorService): Promise<CatalogCacheResult> {
     const template = findTemplate(templates, "get-product-options-and-info");
     if (!template) {
       throw new Error("Catalog template is missing");
     }
 
     const url = new URL(template.url);
-    url.searchParams.set("urlPath", "evs");
+    url.searchParams.set("urlPath", service);
     url.searchParams.set("region", region);
 
     const response = await fetch("/api/replay", {
@@ -1612,18 +1639,30 @@ export default function Home() {
 
     const data = (await response.json()) as CatalogCacheResult;
     if (!response.ok) {
-      throw new Error(data.error ?? `EVS catalog lookup failed with status ${response.status}`);
+      throw new Error(data.error ?? `${service.toUpperCase()} catalog lookup failed with status ${response.status}`);
     }
 
     return {
       ...data,
       cache: {
         ...(data.cache ?? {}),
-        source: "remote-evs-catalog",
+        source: `remote-${service}-catalog`,
         region,
       },
       regions: catalogRegions,
     };
+  }
+
+  async function getCatalogForService(region: string, service: CalculatorService): Promise<CatalogCacheResult> {
+    if (service === "evs") {
+      return fetchEvsCatalog(region);
+    }
+
+    try {
+      return await fetchCatalogFromCache(region);
+    } catch {
+      return fetchRemoteCatalog(region, service);
+    }
   }
 
   const loadCartDetail = useCallback(async (key: string, force = false) => {
@@ -1741,9 +1780,7 @@ export default function Home() {
       const nextRegion = region.trim() || DEFAULT_REGION;
       const normalizedPreferredResourceCode = preferredResourceCode ? normalizeDiskTypeApiCode(preferredResourceCode) : "";
       setCatalogRegion(nextRegion);
-      const result = service === "ecs"
-        ? await fetchCatalogFromCache(nextRegion)
-        : await fetchEvsCatalog(nextRegion);
+      const result = await getCatalogForService(nextRegion, service);
       setCatalogResult(result);
       setCatalogRegions((current) => mergeCatalogRegions(result.regions ?? current, nextRegion));
 
@@ -1791,7 +1828,7 @@ export default function Home() {
     const nextRegion = catalogRegion.trim() || DEFAULT_REGION;
     const pricingCatalog = isCatalogLoadedForRegion(catalogResult, nextRegion) && catalogResult
       ? catalogResult
-      : await fetchCatalogFromCache(nextRegion);
+      : await getCatalogForService(nextRegion, "ecs");
     const nextFlavors = getCatalogFlavors(pricingCatalog.response.body);
     const sampleBody = editTemplate.bodyJson as EditCartPayload;
     const sampleItem = sampleBody.cartListData[0];
@@ -1805,6 +1842,10 @@ export default function Home() {
     const diskType = normalizeDiskTypeApiCode(bulkDiskType) || DEFAULT_CATALOG_DISK_TYPE;
     const diskSize = Number.parseInt(bulkDiskSize, 10) || Number.parseInt(DEFAULT_CATALOG_DISK_SIZE, 10);
     const descriptionBase = resolveItemDescription(configDescription, DEFAULT_ECS_DESCRIPTION);
+    const disk = getCatalogDisks(pricingCatalog.response.body).find((entry) => entry.resourceSpecCode === diskType);
+    if (!disk) {
+      throw new Error(`Disk type ${diskType} is unavailable in ${nextRegion}`);
+    }
     const matchedItems = requests.map((request) => {
       const flavor = selectCheapestFlavorForRequirements(nextFlavors, {
         pricingMode: catalogPricingMode,
@@ -1834,7 +1875,7 @@ export default function Home() {
       }
 
       const description = resolveItemDescription(request.name, descriptionBase);
-      const item = buildEcsCalculatorItem(sampleItem, flavor, estimate, {
+      const item = buildEcsCalculatorItem(sampleItem, flavor, disk, estimate, {
         region: nextRegion,
         quantity,
         durationValue,
@@ -2123,41 +2164,282 @@ export default function Home() {
     setEditorTarget(null);
   }
 
-  async function createCart() {
+  async function createLiveCartWithName(name: string): Promise<string> {
     const template = findTemplate(templates, "create-cart");
     if (!template || typeof template.bodyJson !== "object" || !template.bodyJson) {
-      setAppError("Create cart template is missing");
-      return;
+      throw new Error("Create cart template is missing");
     }
 
+    const payload = cloneJson(template.bodyJson as Record<string, unknown>);
+    payload.name = name.trim() || "Team proposal cart";
+    const result = await replayOne("create-cart", {
+      bodyRaw: JSON.stringify(payload),
+    });
+    const key = (result.response.body as { data?: string }).data;
+    if (typeof key !== "string" || !key.trim()) {
+      throw new Error("Huawei create cart did not return a cart key");
+    }
+
+    setPublishResult(result);
+    setCartDetailCache((current) => ({
+      ...current,
+      [key]: {
+        billingMode: "cart.shareList.billingModeTotal",
+        cartListData: [],
+        name: payload.name as string,
+        totalPrice: {
+          amount: 0,
+          originalAmount: 0,
+          discountAmount: 0,
+        },
+      },
+    }));
+
+    return key;
+  }
+
+  async function submitCartUpdate(key: string, payload: EditCartPayload): Promise<ReplayResult> {
+    const template = findTemplate(templates, "edit-cart");
+    if (!template || typeof template.bodyJson !== "object" || !template.bodyJson) {
+      throw new Error("Edit cart template is missing");
+    }
+
+    const result = await replayOne("edit-cart", {
+      url: buildCartMutationUrl(template, "update", key),
+      bodyRaw: JSON.stringify(payload),
+    });
+
+    setPublishResult(result);
+    return result;
+  }
+
+  async function cloneCartToNewKey(detail: ShareCartDetail, nextName: string): Promise<string> {
+    const nextKey = await createLiveCartWithName(nextName);
+    const duplicatePayload: EditCartPayload = {
+      billingMode: detail.billingMode || "cart.shareList.billingModeTotal",
+      cartListData: (detail.cartListData ?? []).map((item) => cloneJson(item as CalculatorCartItemPayload)),
+      name: nextName,
+      totalPrice: buildCartTotalPrice((detail.cartListData ?? []).map((item) => cloneJson(item as CalculatorCartItemPayload))),
+    };
+
+    await submitCartUpdate(nextKey, duplicatePayload);
+    setCartDetailCache((current) => ({
+      ...current,
+      [nextKey]: {
+        billingMode: duplicatePayload.billingMode,
+        cartListData: duplicatePayload.cartListData,
+        name: duplicatePayload.name,
+        totalPrice: duplicatePayload.totalPrice,
+      },
+    }));
+    return nextKey;
+  }
+
+  async function buildBillingConversionItems(detail: ShareCartDetail, targetPricingMode: "ONDEMAND" | "RI") {
+    const items = getRemoteCartItems(detail);
+    const catalogs = new Map<string, CatalogCacheResult>();
+    const getCatalog = async (region: string, service: CalculatorService) => {
+      const key = `${service}:${region}`;
+      const cached = catalogs.get(key);
+      if (cached) {
+        return cached;
+      }
+
+      const result = await getCatalogForService(region, service);
+      catalogs.set(key, result);
+      return result;
+    };
+
+    return Promise.all(items.map(async (item) => {
+      const description = resolveItemDescription(
+        item.description,
+        item.service === "ecs" ? item.resourceCode : DEFAULT_EVS_DESCRIPTION,
+      );
+
+      if (item.service === "ecs") {
+        const catalog = await getCatalog(item.region, "ecs");
+        const catalogBody = catalog.response.body;
+        const targetDiskType = normalizeDiskTypeApiCode(item.diskType) || DEFAULT_CATALOG_DISK_TYPE;
+        const durationValue = getNormalizedDurationValue(targetPricingMode, String(item.hours));
+        const targetDisk = getCatalogDisks(catalogBody).find((disk) => disk.resourceSpecCode === targetDiskType);
+        if (!targetDisk) {
+          throw new Error(`Disk type ${targetDiskType} is unavailable in ${item.region}`);
+        }
+
+        const targetFlavors = getCatalogFlavors(catalogBody);
+        const currentFlavor = targetFlavors.find((flavor) => (
+          flavor.resourceSpecCode === item.resourceCode
+          && Number.isFinite(getFlavorBasePrice(flavor, targetPricingMode))
+        ));
+        const matchedFlavor = currentFlavor ?? selectCheapestFlavorForRequirements(targetFlavors, {
+          pricingMode: targetPricingMode,
+          minVcpus: item.vcpus,
+          minRamGb: item.ramGb,
+        });
+        if (!matchedFlavor) {
+          throw new Error(`No ${getPricingModeLabel(targetPricingMode)} ECS in ${item.region} matches ${item.vcpus} vCPU / ${item.ramGb.toFixed(0)} GB RAM`);
+        }
+
+        const estimate = buildCatalogPriceEstimate(catalogBody, {
+          flavorCode: matchedFlavor.resourceSpecCode,
+          diskType: targetDiskType,
+          diskSize: item.diskSize,
+          durationValue,
+          quantity: item.quantity,
+          pricingMode: targetPricingMode,
+        });
+        if (!estimate) {
+          throw new Error(`Cached ${getPricingModeLabel(targetPricingMode)} pricing is unavailable for ${matchedFlavor.resourceSpecCode} in ${item.region}`);
+        }
+
+        return buildEcsCalculatorItemPayload(item.payload, matchedFlavor, targetDisk, estimate, {
+          region: item.region,
+          quantity: item.quantity,
+          durationValue,
+          pricingMode: targetPricingMode,
+          diskType: targetDiskType,
+          diskSize: item.diskSize,
+          title: description,
+          description,
+        });
+      }
+
+      const catalog = await getCatalog(item.region, "evs");
+      const catalogBody = catalog.response.body;
+      const targetDiskType = normalizeDiskTypeApiCode(item.diskType) || DEFAULT_CATALOG_DISK_TYPE;
+      const targetDisk = getCatalogDisks(catalogBody).find((disk) => disk.resourceSpecCode === targetDiskType);
+      if (!targetDisk) {
+        throw new Error(`Disk type ${targetDiskType} is unavailable in ${item.region}`);
+      }
+
+      const durationValue = getNormalizedDurationValue("ONDEMAND", String(item.hours));
+      const estimate = buildCatalogDiskPriceEstimate(catalogBody, {
+        diskType: targetDiskType,
+        diskSize: item.diskSize,
+        durationValue,
+        quantity: item.quantity,
+        pricingMode: "ONDEMAND",
+      });
+      if (!estimate) {
+        throw new Error(`Cached on-demand EVS pricing is unavailable for ${targetDiskType} in ${item.region}`);
+      }
+
+      return buildEvsCalculatorItemPayload(item.payload, targetDisk, estimate, {
+        region: item.region,
+        quantity: item.quantity,
+        durationValue,
+        pricingMode: "ONDEMAND",
+        diskType: targetDiskType,
+        diskSize: item.diskSize,
+        title: description,
+        description,
+      });
+    }));
+  }
+
+  async function buildRegionConversionItems(detail: ShareCartDetail, targetRegion: string) {
+    const items = getRemoteCartItems(detail);
+    const ecsCatalog = await getCatalogForService(targetRegion, "ecs");
+    const evsCatalog = await getCatalogForService(targetRegion, "evs");
+    const ecsCatalogBody = ecsCatalog.response.body;
+    const evsCatalogBody = evsCatalog.response.body;
+
+    return Promise.all(items.map(async (item) => {
+      const description = resolveItemDescription(
+        item.description,
+        item.service === "ecs" ? item.resourceCode : DEFAULT_EVS_DESCRIPTION,
+      );
+
+      if (item.service === "ecs") {
+        const targetDiskType = normalizeDiskTypeApiCode(item.diskType) || DEFAULT_CATALOG_DISK_TYPE;
+        const targetDisk = getCatalogDisks(ecsCatalogBody).find((disk) => disk.resourceSpecCode === targetDiskType);
+        if (!targetDisk) {
+          throw new Error(`Disk type ${targetDiskType} is unavailable in ${targetRegion}`);
+        }
+
+        const targetFlavors = getCatalogFlavors(ecsCatalogBody);
+        const exactFlavor = targetFlavors.find((flavor) => (
+          flavor.resourceSpecCode === item.resourceCode
+          && Number.isFinite(getFlavorBasePrice(flavor, item.pricingMode))
+        ));
+        const targetFlavor = item.vcpus > 0 && item.ramGb > 0
+          ? selectCheapestFlavorForRequirements(targetFlavors, {
+              pricingMode: item.pricingMode,
+              minVcpus: item.vcpus,
+              minRamGb: item.ramGb,
+            })
+          : exactFlavor;
+        if (!targetFlavor) {
+          throw new Error(`No ${getPricingModeLabel(item.pricingMode)} ECS in ${targetRegion} matches ${item.vcpus} vCPU / ${item.ramGb.toFixed(0)} GB RAM`);
+        }
+
+        const durationValue = getNormalizedDurationValue(item.pricingMode, String(item.hours));
+        const estimate = buildCatalogPriceEstimate(ecsCatalogBody, {
+          flavorCode: targetFlavor.resourceSpecCode,
+          diskType: targetDiskType,
+          diskSize: item.diskSize,
+          durationValue,
+          quantity: item.quantity,
+          pricingMode: item.pricingMode,
+        });
+        if (!estimate) {
+          throw new Error(`Cached ${getPricingModeLabel(item.pricingMode)} pricing is unavailable for ${targetFlavor.resourceSpecCode} in ${targetRegion}`);
+        }
+
+        return buildEcsCalculatorItemPayload(item.payload, targetFlavor, targetDisk, estimate, {
+          region: targetRegion,
+          quantity: item.quantity,
+          durationValue,
+          pricingMode: item.pricingMode,
+          diskType: targetDiskType,
+          diskSize: item.diskSize,
+          title: description,
+          description,
+        });
+      }
+
+      const targetPricingMode = item.pricingMode === "RI" ? "ONDEMAND" : item.pricingMode as Exclude<CatalogPricingMode, "RI">;
+      const targetDiskType = normalizeDiskTypeApiCode(item.diskType) || DEFAULT_CATALOG_DISK_TYPE;
+      const targetDisk = getCatalogDisks(evsCatalogBody).find((disk) => disk.resourceSpecCode === targetDiskType);
+      if (!targetDisk) {
+        throw new Error(`Disk type ${targetDiskType} is unavailable in ${targetRegion}`);
+      }
+
+      const durationValue = getNormalizedDurationValue(targetPricingMode, String(item.hours));
+      const estimate = buildCatalogDiskPriceEstimate(evsCatalogBody, {
+        diskType: targetDiskType,
+        diskSize: item.diskSize,
+        durationValue,
+        quantity: item.quantity,
+        pricingMode: targetPricingMode,
+      });
+      if (!estimate) {
+        throw new Error(`Cached ${getPricingModeLabel(targetPricingMode, "evs")} pricing is unavailable for ${targetDiskType} in ${targetRegion}`);
+      }
+
+      return buildEvsCalculatorItemPayload(item.payload, targetDisk, estimate, {
+        region: targetRegion,
+        quantity: item.quantity,
+        durationValue,
+        pricingMode: targetPricingMode,
+        diskType: targetDiskType,
+        diskSize: item.diskSize,
+        title: description,
+        description,
+      });
+    }));
+  }
+
+  async function createCart() {
     setCreateCartLoading(true);
     setAppError("");
 
     try {
-      const payload = cloneJson(template.bodyJson as Record<string, unknown>);
-      payload.name = newCartName.trim() || "Team proposal cart";
-      const result = await replayOne("create-cart", {
-        bodyRaw: JSON.stringify(payload),
-      });
-      const key = (result.response.body as { data?: string }).data;
+      const name = newCartName.trim() || "Team proposal cart";
+      const key = await createLiveCartWithName(name);
       await refreshCarts();
-
-      if (typeof key === "string") {
-        setSelectedCartKey(key);
-        setSelectedCartName(payload.name as string);
-        setCartDetailCache((current) => ({
-          ...current,
-          [key]: {
-            name: payload.name as string,
-            cartListData: [],
-            totalPrice: {
-              amount: 0,
-              originalAmount: 0,
-              discountAmount: 0,
-            },
-          },
-        }));
-      }
+      setSelectedCartKey(key);
+      setSelectedCartName(name);
     } catch (error) {
       setAppError(error instanceof Error ? error.message : "Failed to create cart");
     } finally {
@@ -2180,7 +2462,7 @@ export default function Home() {
       const nextRegion = catalogRegion.trim() || DEFAULT_REGION;
       const pricingCatalog = nextRegion === catalogRegion.trim() && catalogResult
         ? catalogResult
-        : await (selectedService === "ecs" ? fetchCatalogFromCache(nextRegion) : fetchEvsCatalog(nextRegion));
+        : await getCatalogForService(nextRegion, selectedService);
       let estimate: PriceResponseBody | null = null;
       let estimateResultPayload: ReplayResult;
 
@@ -2310,7 +2592,13 @@ export default function Home() {
         return;
       }
 
-      const item = buildEcsCalculatorItem(sampleItem, selectedFlavor, estimateBody, {
+      const disk = getCatalogDisks(catalogResult?.response.body).find((entry) => entry.resourceSpecCode === (normalizeDiskTypeApiCode(configDiskType) || DEFAULT_CATALOG_DISK_TYPE));
+      if (!disk) {
+        setAppError(`Load the ${getDiskTypeDisplayName(configDiskType)} disk catalog before adding the ECS item`);
+        return;
+      }
+
+      const item = buildEcsCalculatorItem(sampleItem, selectedFlavor, disk, estimateBody, {
         id: editingDraftItem?.id,
         region: nextRegion,
         quantity,
@@ -2404,12 +2692,8 @@ export default function Home() {
       base.cartListData = nextItems.map((item) => cloneJson(item));
       base.totalPrice = buildCartTotalPrice(base.cartListData);
 
-      const result = await replayOne("edit-cart", {
-        url: buildCartMutationUrl(template, "update", selectedCartKey.trim()),
-        bodyRaw: JSON.stringify(base),
-      });
+      const result = await submitCartUpdate(selectedCartKey.trim(), base);
 
-      setPublishResult(result);
       setCartDetailCache((current) => ({
         ...current,
         [selectedCartKey.trim()]: {
@@ -2427,6 +2711,115 @@ export default function Home() {
       return null;
     } finally {
       setPublishLoading(false);
+    }
+  }
+
+  async function convertSelectedCartBillingMode() {
+    const trimmedKey = selectedCartKey.trim();
+    if (!trimmedKey) {
+      setAppError("Select or create a Huawei cart first");
+      return;
+    }
+
+    setConversionAction("billing");
+    setConversionSummary("");
+    setAppError("");
+
+    try {
+      const detail = currentCartDetail ?? await loadCartDetail(trimmedKey, false);
+      if (!detail) {
+        throw new Error("Load the selected cart before converting it");
+      }
+
+      const sourceName = detail.name?.trim() || selectedCartName.trim() || "Calculator cart";
+      const duplicateName = buildDuplicateCartName(
+        sourceName,
+        billingConversionMode === "RI" ? "RI ECS" : "Pay-per-use ECS",
+      );
+      const nextKey = await cloneCartToNewKey(detail, duplicateName);
+      const convertedItems = await buildBillingConversionItems(detail, billingConversionMode);
+      const nextPayload: EditCartPayload = {
+        billingMode: detail.billingMode || "cart.shareList.billingModeTotal",
+        cartListData: convertedItems.map((item) => cloneJson(item)),
+        name: duplicateName,
+        totalPrice: buildCartTotalPrice(convertedItems),
+      };
+
+      await submitCartUpdate(nextKey, nextPayload);
+      setCartDetailCache((current) => ({
+        ...current,
+        [nextKey]: {
+          billingMode: nextPayload.billingMode,
+          cartListData: nextPayload.cartListData,
+          name: nextPayload.name,
+          totalPrice: nextPayload.totalPrice,
+        },
+      }));
+      await refreshCarts();
+      setSelectedCartKey(nextKey);
+      setSelectedCartName(duplicateName);
+      await loadCartDetail(nextKey, true);
+      setConversionSummary(`Created ${duplicateName} by duplicating ${sourceName} and converting ECS items to ${getPricingModeLabel(billingConversionMode)}. EVS stayed on-demand.`);
+    } catch (error) {
+      setAppError(error instanceof Error ? error.message : "Failed to convert the selected cart billing mode");
+    } finally {
+      setConversionAction(null);
+    }
+  }
+
+  async function convertSelectedCartRegion() {
+    const trimmedKey = selectedCartKey.trim();
+    const targetRegion = regionConversionTarget.trim();
+    if (!trimmedKey) {
+      setAppError("Select or create a Huawei cart first");
+      return;
+    }
+    if (!targetRegion) {
+      setAppError("Choose a target region before converting the cart");
+      return;
+    }
+
+    setConversionAction("region");
+    setConversionSummary("");
+    setAppError("");
+
+    try {
+      const detail = currentCartDetail ?? await loadCartDetail(trimmedKey, false);
+      if (!detail) {
+        throw new Error("Load the selected cart before converting it");
+      }
+
+      const sourceName = detail.name?.trim() || selectedCartName.trim() || "Calculator cart";
+      const regionLabel = regionConversionOptions.find((region) => region.id === targetRegion)?.name ?? targetRegion;
+      const duplicateName = buildDuplicateCartName(sourceName, regionLabel);
+      const nextKey = await cloneCartToNewKey(detail, duplicateName);
+      const convertedItems = await buildRegionConversionItems(detail, targetRegion);
+      const nextPayload: EditCartPayload = {
+        billingMode: detail.billingMode || "cart.shareList.billingModeTotal",
+        cartListData: convertedItems.map((item) => cloneJson(item)),
+        name: duplicateName,
+        totalPrice: buildCartTotalPrice(convertedItems),
+      };
+
+      await submitCartUpdate(nextKey, nextPayload);
+      setCartDetailCache((current) => ({
+        ...current,
+        [nextKey]: {
+          billingMode: nextPayload.billingMode,
+          cartListData: nextPayload.cartListData,
+          name: nextPayload.name,
+          totalPrice: nextPayload.totalPrice,
+        },
+      }));
+      await refreshCarts();
+      setSelectedCartKey(nextKey);
+      setSelectedCartName(duplicateName);
+      await loadCartDetail(nextKey, true);
+      setConversionSummary(`Created ${duplicateName} by duplicating ${sourceName} and converting all items to ${regionLabel}. ECS flavors were re-matched; EVS kept the same type and size.`);
+    } catch (error) {
+      setAppError(error instanceof Error ? error.message : "Failed to convert the selected cart region");
+    } finally {
+      setConversionAction(null);
     }
   }
 
@@ -2600,16 +2993,24 @@ export default function Home() {
       }
 
       replacementItems = [
-        buildEcsCalculatorItemPayload(editingRemoteItem.payload, selectedFlavor, estimateBody, {
-          region: catalogRegion.trim() || editingRemoteItem.region,
-          quantity,
-          durationValue,
-          pricingMode: catalogPricingMode,
-          diskType: normalizeDiskTypeApiCode(configDiskType) || normalizeDiskTypeApiCode(editingRemoteItem.diskType),
-          diskSize,
-          title: resolveItemDescription(configDescription, selectedFlavor.resourceSpecCode),
-          description: resolveItemDescription(configDescription, editingRemoteItem.description || selectedFlavor.resourceSpecCode),
-        }),
+        (() => {
+          const diskType = normalizeDiskTypeApiCode(configDiskType) || normalizeDiskTypeApiCode(editingRemoteItem.diskType);
+          const disk = getCatalogDisks(catalogResult?.response.body).find((entry) => entry.resourceSpecCode === diskType);
+          if (!disk) {
+            throw new Error(`Load the ${getDiskTypeDisplayName(diskType)} disk catalog before saving the ECS item`);
+          }
+
+          return buildEcsCalculatorItemPayload(editingRemoteItem.payload, selectedFlavor, disk, estimateBody, {
+            region: catalogRegion.trim() || editingRemoteItem.region,
+            quantity,
+            durationValue,
+            pricingMode: catalogPricingMode,
+            diskType,
+            diskSize,
+            title: resolveItemDescription(configDescription, selectedFlavor.resourceSpecCode),
+            description: resolveItemDescription(configDescription, editingRemoteItem.description || selectedFlavor.resourceSpecCode),
+          });
+        })(),
       ];
     } else {
       if (!selectedDisk) {
@@ -2841,6 +3242,75 @@ export default function Home() {
                   Cart key
                 </label>
                 <input className="field" id="selected-cart-key" onChange={(event) => setSelectedCartKey(event.target.value)} value={selectedCartKey} />
+              </div>
+
+              <div className="soft-panel mt-4">
+                <p className="section-title">Duplicate and convert</p>
+                <p className="mt-2 text-sm text-slate-600">
+                  Each conversion first duplicates the selected cart, then applies the changes to the duplicated copy.
+                </p>
+
+                <label className="label mt-4" htmlFor="billing-conversion-mode">
+                  ECS billing conversion
+                </label>
+                <select
+                  className="field"
+                  disabled={!selectedCartKey.trim() || conversionAction !== null}
+                  id="billing-conversion-mode"
+                  onChange={(event) => setBillingConversionMode(event.target.value as "ONDEMAND" | "RI")}
+                  value={billingConversionMode}
+                >
+                  {BILLING_CONVERSION_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-2 text-xs text-slate-500">
+                  Only ECS items are converted. EVS items always stay pay-per-use in the duplicated cart.
+                </p>
+                <button
+                  className="btn btn-secondary mt-3 w-full"
+                  disabled={!selectedCartKey.trim() || conversionAction !== null || cartDetailLoading}
+                  onClick={() => void convertSelectedCartBillingMode()}
+                  type="button"
+                >
+                  {conversionAction === "billing" ? "Converting billing..." : "Duplicate cart and convert ECS billing"}
+                </button>
+
+                <label className="label mt-4" htmlFor="region-conversion-target">
+                  Region conversion
+                </label>
+                <select
+                  className="field"
+                  disabled={!selectedCartKey.trim() || conversionAction !== null}
+                  id="region-conversion-target"
+                  onChange={(event) => setRegionConversionTarget(event.target.value)}
+                  value={regionConversionTarget}
+                >
+                  {regionConversionOptions.map((region) => (
+                    <option key={region.id} value={region.id}>
+                      {region.name === region.id ? region.id : `${region.name} (${region.id})`}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-2 text-xs text-slate-500">
+                  Defaults flip between Brazil ({BRAZIL_REGION}) and Santiago ({SANTIAGO_REGION}). ECS items are rematched to the cheapest compatible flavor in the target region.
+                </p>
+                <button
+                  className="btn btn-secondary mt-3 w-full"
+                  disabled={!selectedCartKey.trim() || !regionConversionTarget.trim() || conversionAction !== null || cartDetailLoading}
+                  onClick={() => void convertSelectedCartRegion()}
+                  type="button"
+                >
+                  {conversionAction === "region" ? "Converting region..." : "Duplicate cart and convert region"}
+                </button>
+
+                {conversionSummary ? (
+                  <div className="result-strip mt-4">
+                    <p className="text-sm font-semibold text-slate-900">{conversionSummary}</p>
+                  </div>
+                ) : null}
               </div>
 
               <div className="mt-4">
