@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  buildCatalogDiskPriceEstimate,
   buildCatalogPriceEstimate,
   dedupeCatalogDisks,
   dedupeCatalogFlavors,
@@ -395,6 +396,76 @@ describe("catalog helpers", () => {
           amount: 0,
           discountAmount: 0,
           originalAmount: 0,
+        },
+      ],
+    });
+  });
+
+  test("buildCatalogDiskPriceEstimate calculates ONDEMAND EVS totals from cached catalog data", () => {
+    const estimate = buildCatalogDiskPriceEstimate({
+      product: {
+        ebs_volume: [
+          makeDisk("SAS", {
+            productId: "disk-sas",
+            bakPlanList: [{ billingMode: "ONDEMAND", amount: 0.02 }],
+          }),
+        ],
+      },
+    }, {
+      diskType: "SAS",
+      diskSize: 50,
+      durationValue: 10,
+      quantity: 2,
+      pricingMode: "ONDEMAND",
+    });
+
+    expect(estimate).toEqual({
+      amount: 20,
+      discountAmount: 0,
+      originalAmount: 20,
+      currency: "USD",
+      productRatingResult: [
+        {
+          id: "cached-disk-disk-sas",
+          productId: "disk-sas",
+          amount: 20,
+          discountAmount: 0,
+          originalAmount: 20,
+        },
+      ],
+    });
+  });
+
+  test("buildCatalogDiskPriceEstimate calculates MONTHLY EVS totals from cached catalog data", () => {
+    const estimate = buildCatalogDiskPriceEstimate({
+      product: {
+        ebs_volume: [
+          makeDisk("ESSD", {
+            productId: "disk-essd",
+            planList: [{ billingMode: "MONTHLY", amount: 0.592 }],
+          }),
+        ],
+      },
+    }, {
+      diskType: "ESSD",
+      diskSize: 40,
+      durationValue: 3,
+      quantity: 2,
+      pricingMode: "MONTHLY",
+    });
+
+    expect(estimate).toEqual({
+      amount: 142.08,
+      discountAmount: 0,
+      originalAmount: 142.08,
+      currency: "USD",
+      productRatingResult: [
+        {
+          id: "cached-disk-disk-essd",
+          productId: "disk-essd",
+          amount: 142.08,
+          discountAmount: 0,
+          originalAmount: 142.08,
         },
       ],
     });

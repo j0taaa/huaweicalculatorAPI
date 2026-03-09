@@ -2,7 +2,10 @@
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
+  buildCatalogDiskPriceEstimate,
   buildCatalogPriceEstimate,
+  getCatalogDisks,
+  getDiskBasePrice,
   getEffectiveDiskPricingMode,
   getCatalogFlavors,
   getFlavorBasePrice,
@@ -11,6 +14,7 @@ import {
   selectCheapestFlavorForRequirements,
   type CatalogPricingMode,
   type PriceResponseBody,
+  type ProductDisk,
   type ProductFlavor,
 } from "@/lib/catalog";
 
@@ -130,6 +134,7 @@ type ShareCartItemPayload = {
     _customTitle?: string;
     description?: string;
     region?: string;
+    serviceCode?: string;
     amount?: number;
     originalAmount?: number;
     purchaseNum?: {
@@ -158,9 +163,12 @@ type ShareCartDetail = {
   };
 };
 
+type CalculatorService = "ecs" | "evs";
+
 type RemoteCartItem = {
   id: string;
   index: number;
+  service: CalculatorService;
   title: string;
   description: string;
   region: string;
@@ -172,7 +180,7 @@ type RemoteCartItem = {
   diskType: string;
   diskSize: number;
   diskLabel: string;
-  flavorCode: string;
+  resourceCode: string;
   totalAmount: number;
   originalAmount: number;
   payload: CalculatorCartItemPayload;
@@ -207,6 +215,7 @@ type CalculatorCartItemPayload = {
 
 type CalculatorItem = {
   id: string;
+  service: CalculatorService;
   title: string;
   description: string;
   region: string;
@@ -217,7 +226,7 @@ type CalculatorItem = {
   durationUnit: string;
   diskType: string;
   diskSize: number;
-  flavorCode: string;
+  resourceCode: string;
   currency: string;
   totalAmount: number;
   originalAmount: number;
@@ -239,12 +248,38 @@ type BulkEcsMatch = {
   currency: string;
 };
 
-type CalculatorItemConfig = {
+type BulkEvsRequest = {
+  name?: string;
+  size: number;
+  type?: string;
+};
+
+type BulkEvsMatch = {
+  request: BulkEvsRequest;
+  diskType: string;
+  diskSizes: number[];
+  totalAmount: number;
+  currency: string;
+};
+
+type EcsCalculatorItemConfig = {
   id?: string;
   region: string;
   quantity: number;
   durationValue: number;
   pricingMode: CatalogPricingMode;
+  diskType: string;
+  diskSize: number;
+  title: string;
+  description: string;
+};
+
+type EvsCalculatorItemConfig = {
+  id?: string;
+  region: string;
+  quantity: number;
+  durationValue: number;
+  pricingMode: Exclude<CatalogPricingMode, "RI">;
   diskType: string;
   diskSize: number;
   title: string;
@@ -268,6 +303,10 @@ const CONFIG_QUANTITY_OPTIONS = ["1", "2", "3", "5", "10"];
 const DEFAULT_REGION = "sa-brazil-1";
 const DEFAULT_CATALOG_DISK_TYPE = "SAS";
 const DEFAULT_CATALOG_DISK_SIZE = "40";
+const DEFAULT_SERVICE: CalculatorService = "ecs";
+const DEFAULT_EVS_TITLE = "Elastic Volume Service";
+const DEFAULT_EVS_DESCRIPTION = "Generated from the custom calculator";
+const MAX_EVS_DISK_SIZE_GB = 32768;
 const DEFAULT_PRICING_MODE: CatalogPricingMode = "ONDEMAND";
 const PRICING_MODE_OPTIONS: Array<{ value: CatalogPricingMode; label: string }> = [
   { value: "ONDEMAND", label: "On-demand" },
@@ -286,13 +325,23 @@ const DISK_TYPE_OPTIONS = [
 const DISK_TYPE_LABELS: Record<string, string> = Object.fromEntries(
   DISK_TYPE_OPTIONS.map((option) => [option.apiCode, option.label]),
 );
+const SERVICE_OPTIONS: Array<{ value: CalculatorService; label: string; description: string }> = [
+  { value: "ecs", label: "ECS", description: "Elastic Cloud Server" },
+  { value: "evs", label: "EVS", description: "Elastic Volume Service" },
+];
 
 function isCatalogPricingMode(value: string): value is CatalogPricingMode {
   return PRICING_MODE_OPTIONS.some((option) => option.value === value);
 }
 
-function getPricingModeLabel(pricingMode: CatalogPricingMode): string {
-  return PRICING_MODE_OPTIONS.find((option) => option.value === pricingMode)?.label ?? pricingMode;
+function getPricingModeOptions(service: CalculatorService) {
+  return service === "evs"
+    ? PRICING_MODE_OPTIONS.filter((option) => option.value !== "RI")
+    : PRICING_MODE_OPTIONS;
+}
+
+function getPricingModeLabel(pricingMode: CatalogPricingMode, service: CalculatorService = "ecs"): string {
+  return getPricingModeOptions(service).find((option) => option.value === pricingMode)?.label ?? pricingMode;
 }
 
 function getPricingRateLabel(pricingMode: CatalogPricingMode): string {
@@ -347,6 +396,10 @@ function getPricingDurationOptions(pricingMode: CatalogPricingMode): string[] {
   }
 }
 
+function getDefaultPricingMode(service: CalculatorService): CatalogPricingMode {
+  return getPricingModeOptions(service)[0]?.value ?? DEFAULT_PRICING_MODE;
+}
+
 function getDefaultDurationValue(pricingMode: CatalogPricingMode): string {
   return getPricingDurationOptions(pricingMode)[0] ?? "1";
 }
@@ -374,6 +427,19 @@ function getStoredPricingMode(item: ShareCartItemPayload): CatalogPricingMode {
   ).trim();
 
   return isCatalogPricingMode(candidate) ? candidate : DEFAULT_PRICING_MODE;
+}
+
+function getStoredService(item: ShareCartItemPayload): CalculatorService {
+  const selectedProduct = item.selectedProduct ?? {};
+  const serviceCode = selectedProduct.serviceCode?.trim().toLowerCase() ?? "";
+  if (serviceCode === "evs") {
+    return "evs";
+  }
+
+  const productInfos = Array.isArray(selectedProduct.productAllInfos) ? selectedProduct.productAllInfos : [];
+  const hasVm = productInfos.some((info) => typeof info?.resourceType === "string" && info.resourceType.includes(".vm"));
+  const hasSingleDisk = productInfos.length === 1 && productInfos.every((info) => typeof info?.resourceType === "string" && info.resourceType.includes(".volume"));
+  return hasSingleDisk && !hasVm ? "evs" : "ecs";
 }
 
 function withCurrentOption(options: string[], current: string): string[] {
@@ -580,6 +646,53 @@ function parseBulkEcsRequests(input: string): BulkEcsRequest[] {
   });
 }
 
+function parseBulkEvsRequests(input: string): BulkEvsRequest[] {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    throw new Error("Paste at least one EVS request");
+  }
+
+  const tryParse = (value: string) => JSON.parse(value) as unknown;
+  let parsed: unknown;
+
+  try {
+    parsed = tryParse(trimmed);
+  } catch {
+    const normalized = trimmed
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|\s)\/\/.*$/gm, "")
+      .replace(/([{,]\s*)([A-Za-z_$][\w$]*)(\s*:)/g, "$1\"$2\"$3")
+      .replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, (_, value: string) => `"${value.replace(/\"/g, '"').replace(/"/g, '\\"')}"`)
+      .replace(/,\s*([}\]])/g, "$1");
+    parsed = tryParse(normalized);
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new Error("The EVS input must be an array of objects");
+  }
+
+  return parsed.map((entry, index) => {
+    if (!entry || typeof entry !== "object") {
+      throw new Error(`EVS item ${index + 1} must be an object`);
+    }
+
+    const candidate = entry as Record<string, unknown>;
+    const name = typeof candidate.name === "string" ? candidate.name.trim() : "";
+    const size = typeof candidate.size === "number" ? candidate.size : Number(candidate.size);
+    const type = typeof candidate.type === "string" ? candidate.type.trim() : "";
+
+    if (!Number.isFinite(size) || size <= 0) {
+      throw new Error(`EVS item ${index + 1} must include a positive size value`);
+    }
+
+    return {
+      ...(name ? { name } : {}),
+      size,
+      ...(type ? { type } : {}),
+    };
+  });
+}
+
 function isCatalogLoadedForRegion(result: CatalogCacheResult | null, region: string): boolean {
   return result?.cache?.region?.trim() === region.trim();
 }
@@ -589,12 +702,12 @@ function getFlavorLabel(flavor: ProductFlavor): string {
   return bits.length ? bits.join(" / ") : flavor.resourceSpecCode;
 }
 
-function createCalculatorItemId(flavorCode: string): string {
+function createCalculatorItemId(resourceCode: string): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
 
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}-${flavorCode}`;
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}-${resourceCode}`;
 }
 
 function getFlavorSpec(flavor: ProductFlavor): string {
@@ -615,6 +728,28 @@ function formatDiskLabel(diskType: string, diskSize: number): string {
   return diskSize > 0 ? `${label} ${diskSize}GB` : label;
 }
 
+function splitDiskSize(totalSize: number): number[] {
+  const normalized = Math.max(0, Math.floor(totalSize));
+  if (!normalized) {
+    return [];
+  }
+
+  const chunks: number[] = [];
+  let remaining = normalized;
+  while (remaining > 0) {
+    const nextSize = Math.min(MAX_EVS_DISK_SIZE_GB, remaining);
+    chunks.push(nextSize);
+    remaining -= nextSize;
+  }
+
+  return chunks;
+}
+
+function buildSplitDiskTitle(baseTitle: string, index: number, total: number): string {
+  const trimmed = baseTitle.trim() || DEFAULT_EVS_TITLE;
+  return total > 1 ? `${trimmed} ${index + 1}/${total}` : trimmed;
+}
+
 function getSelectedFlavor(flavors: ProductFlavor[], code: string): ProductFlavor | null {
   return flavors.find((flavor) => flavor.resourceSpecCode === code) ?? null;
 }
@@ -626,29 +761,37 @@ function getRemoteCartItems(detail: ShareCartDetail | null): RemoteCartItem[] {
 
   return detail.cartListData.map((item, index) => {
     const selectedProduct = item.selectedProduct ?? {};
+    const service = getStoredService(item);
     const productInfos = Array.isArray(selectedProduct.productAllInfos) ? selectedProduct.productAllInfos : [];
-    const vmInfo = (productInfos[0] ?? {}) as Record<string, unknown>;
-    const diskInfo = (productInfos[2] ?? {}) as Record<string, unknown>;
+    const vmInfo = (productInfos.find((info) => typeof info?.resourceType === "string" && info.resourceType.includes(".vm")) ?? productInfos[0] ?? {}) as Record<string, unknown>;
+    const diskInfo = (productInfos.find((info) => typeof info?.resourceType === "string" && info.resourceType.includes(".volume")) ?? productInfos[2] ?? productInfos[0] ?? {}) as Record<string, unknown>;
     const pricingMode = getStoredPricingMode(item);
     const durationUnit = selectedProduct.calculatorDurationUnit?.trim() || getPricingDurationUnit(pricingMode);
     const storedDiskPricingMode = selectedProduct.calculatorDiskPricingMode?.trim() ?? "";
-    const flavorCode = typeof vmInfo.resourceSpecCode === "string" ? vmInfo.resourceSpecCode : "Unknown flavor";
+    const resourceCode = service === "ecs"
+      ? (typeof vmInfo.resourceSpecCode === "string" ? vmInfo.resourceSpecCode : "Unknown flavor")
+      : (typeof diskInfo.resourceSpecCode === "string" ? diskInfo.resourceSpecCode : "Unknown disk");
     const diskType = typeof diskInfo.resourceSpecCode === "string" ? diskInfo.resourceSpecCode : "Disk";
     const diskSize = typeof diskInfo.resourceSize === "number" ? diskInfo.resourceSize : 0;
-    const title = selectedProduct._customTitle?.trim() || selectedProduct.description?.trim() || flavorCode || `Item ${index + 1}`;
+    const title = selectedProduct._customTitle?.trim()
+      || selectedProduct.description?.trim()
+      || (service === "ecs" ? resourceCode : formatDiskLabel(diskType, diskSize))
+      || `Item ${index + 1}`;
     const descriptionParts = [
-      typeof vmInfo.performType === "string" ? vmInfo.performType : null,
-      typeof vmInfo.instanceArch === "string" ? vmInfo.instanceArch : null,
+      service === "ecs" && typeof vmInfo.performType === "string" ? vmInfo.performType : null,
+      service === "ecs" && typeof vmInfo.instanceArch === "string" ? vmInfo.instanceArch : null,
+      service === "evs" ? getDiskTypeDisplayName(diskType) : null,
       typeof item.rewriteValue?.global_DESCRIPTION === "string" && item.rewriteValue.global_DESCRIPTION.trim()
         ? item.rewriteValue.global_DESCRIPTION.trim()
         : null,
     ].filter(Boolean);
 
     return {
-      id: `${flavorCode}-${index}`,
+      id: `${service}-${resourceCode}-${index}`,
       index,
+      service,
       title,
-      description: descriptionParts.join(" / ") || "Elastic Cloud Server",
+      description: descriptionParts.join(" / ") || (service === "ecs" ? "Elastic Cloud Server" : "Elastic Volume Service"),
       region: selectedProduct.region?.trim() || "Unknown region",
       quantity: selectedProduct.purchaseNum?.measureValue ?? (typeof vmInfo.productNum === "number" ? vmInfo.productNum : 1),
       hours: selectedProduct.purchaseTime?.measureValue ?? (typeof vmInfo.usageValue === "number" ? vmInfo.usageValue : 744),
@@ -660,7 +803,7 @@ function getRemoteCartItems(detail: ShareCartDetail | null): RemoteCartItem[] {
       diskType,
       diskSize,
       diskLabel: formatDiskLabel(diskType, diskSize),
-      flavorCode,
+      resourceCode,
       totalAmount: selectedProduct.amount ?? 0,
       originalAmount: selectedProduct.originalAmount ?? selectedProduct.amount ?? 0,
       payload: cloneJson(item as CalculatorCartItemPayload),
@@ -738,7 +881,7 @@ function buildCartMutationUrl(template: Template, action: "update" | "delete", k
   return url.toString();
 }
 
-function buildBuyUrl(
+function buildEcsBuyUrl(
   baseUrl: string,
   region: string,
   flavor: ProductFlavor,
@@ -754,20 +897,17 @@ function buildBuyUrl(
   return url.toString();
 }
 
-function buildCalculatorItemPayload(
+function buildEvsBuyUrl(region: string): string {
+  const url = new URL("https://console-intl.huaweicloud.com/evs/");
+  url.searchParams.set("region", region);
+  return `${url.toString()}#/evs/createVolume`;
+}
+
+function buildEcsCalculatorItemPayload(
   sampleItem: CalculatorCartItemPayload,
   flavor: ProductFlavor,
   priceResponse: PriceResponseBody,
-  config: {
-    region: string;
-    quantity: number;
-    durationValue: number;
-    pricingMode: CatalogPricingMode;
-    diskType: string;
-    diskSize: number;
-    title: string;
-    description: string;
-  },
+  config: EcsCalculatorItemConfig,
 ): CalculatorCartItemPayload {
   const payload = cloneJson(sampleItem);
   const selectedProduct = payload.selectedProduct as Record<string, unknown>;
@@ -781,7 +921,7 @@ function buildCalculatorItemPayload(
   const diskPricingMode = getEffectiveDiskPricingMode(config.pricingMode);
   const durationUnit = getPricingDurationUnit(config.pricingMode);
 
-  payload.buyUrl = buildBuyUrl(payload.buyUrl ?? "", config.region, flavor, config.diskType, config.diskSize, config.quantity);
+  payload.buyUrl = buildEcsBuyUrl(payload.buyUrl ?? "", config.region, flavor, config.diskType, config.diskSize, config.quantity);
 
   rewriteValue.global_DESCRIPTION = config.description;
   rewriteValue.global_PRICINGMODE = config.pricingMode;
@@ -929,16 +1069,147 @@ function buildCalculatorItemPayload(
   return payload;
 }
 
-function buildCalculatorItem(
+function buildEvsCalculatorItemPayload(
+  sampleItem: CalculatorCartItemPayload,
+  disk: ProductDisk,
+  priceResponse: PriceResponseBody,
+  config: EvsCalculatorItemConfig,
+): CalculatorCartItemPayload {
+  const payload = cloneJson(sampleItem);
+  const selectedProduct = payload.selectedProduct as Record<string, unknown>;
+  const rewriteValue = payload.rewriteValue as Record<string, unknown>;
+  const existingInfos = Array.isArray(selectedProduct.productAllInfos)
+    ? (selectedProduct.productAllInfos as Array<Record<string, unknown>>)
+    : [];
+  const diskInfo = existingInfos.find((info) => typeof info?.resourceType === "string" && info.resourceType.includes(".volume")) ?? existingInfos[2] ?? existingInfos[0] ?? {};
+  const diskRating = priceResponse.productRatingResult?.[0];
+  const durationUnit = getPricingDurationUnit(config.pricingMode);
+
+  payload.buyUrl = buildEvsBuyUrl(config.region);
+
+  rewriteValue.global_DESCRIPTION = config.description;
+  rewriteValue.global_PRICINGMODE = config.pricingMode;
+  rewriteValue.global_DISKPRICINGMODE = config.pricingMode;
+  rewriteValue.global_DURATIONUNIT = durationUnit;
+  rewriteValue.global_REGIONINFO = {
+    region: config.region,
+    locationType: "commonAZ",
+    chargeMode: config.pricingMode,
+  };
+
+  rewriteValue.template_RENDER = {
+    calculator_product_stepper: {
+      UNSET_Stepper_0: {
+        measureId: 17,
+        measureValue: config.diskSize,
+        measureNameBeforeTrans: "",
+        measurePluralNameBeforeTrans: "",
+        transRate: "",
+        transTarget: "",
+      },
+    },
+    calculator_evs_tip: {
+      type: config.diskType,
+    },
+  };
+
+  rewriteValue.global_ONDEMANDTIME = {
+    UNSET_Stepper_0: {
+      measureId: 4,
+      measureValue: config.durationValue,
+      measureNameBeforeTrans: "",
+      measurePluralNameBeforeTrans: "",
+      transRate: "",
+      transTarget: "",
+    },
+  };
+
+  rewriteValue.global_QUANTITY = {
+    UNSET_Stepper_0: {
+      measureId: 41,
+      measureValue: config.quantity,
+      measureNameBeforeTrans: "calc_29_",
+      measurePluralNameBeforeTrans: "calc_30_",
+      transRate: "",
+      transTarget: "",
+    },
+  };
+
+  selectedProduct.region = config.region;
+  selectedProduct.locationType = "commonAZ";
+  selectedProduct.tag = "general.online.portal";
+  selectedProduct.serviceCode = "evs";
+  selectedProduct.timeTag = Date.now();
+  selectedProduct.description = config.description;
+  selectedProduct._customTitle = config.title;
+  selectedProduct.chargeMode = config.pricingMode;
+  selectedProduct.chargeModeName = config.pricingMode;
+  selectedProduct.calculatorPricingMode = config.pricingMode;
+  selectedProduct.calculatorDiskPricingMode = config.pricingMode;
+  selectedProduct.calculatorDurationUnit = durationUnit;
+  selectedProduct.amount = priceResponse.amount;
+  selectedProduct.discountAmount = priceResponse.discountAmount;
+  selectedProduct.originalAmount = priceResponse.originalAmount;
+  selectedProduct.purchaseTime = {
+    measureValue: config.durationValue,
+    measureId: 4,
+    measureNameBeforeTrans: "",
+    measurePluralNameBeforeTrans: "",
+  };
+  selectedProduct.purchaseNum = {
+    measureValue: config.quantity,
+    measureId: 41,
+    measureNameBeforeTrans: "calc_29_",
+    measurePluralNameBeforeTrans: "calc_30_",
+  };
+
+  selectedProduct.productAllInfos = [
+    {
+      ...(diskInfo as Record<string, unknown>),
+      ...disk,
+      resourceType: disk.resourceType ?? (diskInfo as Record<string, unknown>).resourceType ?? "hws.resource.type.volume",
+      cloudServiceType: disk.cloudServiceType ?? (diskInfo as Record<string, unknown>).cloudServiceType ?? "hws.service.type.ebs",
+      resourceSpecCode: config.diskType,
+      resourceSpecType: disk.resourceSpecType ?? config.diskType,
+      resourceSize: config.diskSize,
+      productNum: config.quantity,
+      selfProductNum: config.quantity,
+      billingMode: config.pricingMode,
+      usageValue: config.durationValue,
+      inquiryResult: {
+        ...(((diskInfo as Record<string, unknown>).inquiryResult as Record<string, unknown>) ?? {}),
+        id: diskRating?.id ?? (((diskInfo as Record<string, unknown>).inquiryResult as Record<string, unknown>)?.id),
+        productId: diskRating?.productId ?? disk.productId ?? (diskInfo as Record<string, unknown>).productId,
+        amount: diskRating?.amount ?? (diskInfo as Record<string, unknown>).amount,
+        discountAmount: diskRating?.discountAmount ?? 0,
+        originalAmount: diskRating?.originalAmount ?? (diskInfo as Record<string, unknown>).originalAmount ?? (diskInfo as Record<string, unknown>).amount,
+        perAmount: null,
+        perDiscountAmount: null,
+        perOriginalAmount: null,
+        perPeriodType: null,
+        measureId: 1,
+        extendParams: null,
+      },
+    },
+  ];
+
+  payload.selectedProduct = selectedProduct;
+  payload.rewriteValue = rewriteValue;
+
+  return payload;
+}
+
+function buildEcsCalculatorItem(
   sampleItem: CalculatorCartItemPayload,
   flavor: ProductFlavor,
   priceResponse: PriceResponseBody,
-  config: CalculatorItemConfig,
+  config: EcsCalculatorItemConfig,
 ): CalculatorItem {
-  const payload = buildCalculatorItemPayload(sampleItem, flavor, priceResponse, config);
+  const payload = buildEcsCalculatorItemPayload(sampleItem, flavor, priceResponse, config);
 
   return {
     id: config.id ?? createCalculatorItemId(flavor.resourceSpecCode),
+    service: "ecs",
     title: config.title,
     description: config.description,
     region: config.region,
@@ -949,7 +1220,36 @@ function buildCalculatorItem(
     durationUnit: getPricingDurationUnit(config.pricingMode),
     diskType: config.diskType,
     diskSize: config.diskSize,
-    flavorCode: flavor.resourceSpecCode,
+    resourceCode: flavor.resourceSpecCode,
+    currency: priceResponse.currency ?? "USD",
+    totalAmount: priceResponse.amount,
+    originalAmount: priceResponse.originalAmount,
+    payload,
+  };
+}
+
+function buildEvsCalculatorItem(
+  sampleItem: CalculatorCartItemPayload,
+  disk: ProductDisk,
+  priceResponse: PriceResponseBody,
+  config: EvsCalculatorItemConfig,
+): CalculatorItem {
+  const payload = buildEvsCalculatorItemPayload(sampleItem, disk, priceResponse, config);
+
+  return {
+    id: config.id ?? createCalculatorItemId(`${config.diskType}-${config.diskSize}`),
+    service: "evs",
+    title: config.title,
+    description: config.description,
+    region: config.region,
+    quantity: config.quantity,
+    hours: config.durationValue,
+    pricingMode: config.pricingMode,
+    diskPricingMode: config.pricingMode,
+    durationUnit: getPricingDurationUnit(config.pricingMode),
+    diskType: config.diskType,
+    diskSize: config.diskSize,
+    resourceCode: config.diskType,
     currency: priceResponse.currency ?? "USD",
     totalAmount: priceResponse.amount,
     originalAmount: priceResponse.originalAmount,
@@ -989,6 +1289,7 @@ export default function Home() {
   const [catalogMinRam, setCatalogMinRam] = useState("0");
   const [catalogSort, setCatalogSort] = useState("price-asc");
   const [catalogPricingMode, setCatalogPricingMode] = useState<CatalogPricingMode>(DEFAULT_PRICING_MODE);
+  const [selectedService, setSelectedService] = useState<CalculatorService>(DEFAULT_SERVICE);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogResult, setCatalogResult] = useState<CatalogCacheResult | null>(null);
   const [selectedFlavorCode, setSelectedFlavorCode] = useState("");
@@ -1009,6 +1310,13 @@ export default function Home() {
   const [bulkMatchLoading, setBulkMatchLoading] = useState(false);
   const [bulkMatchSummary, setBulkMatchSummary] = useState("");
   const [bulkMatchResults, setBulkMatchResults] = useState<BulkEcsMatch[]>([]);
+  const [bulkEvsInput, setBulkEvsInput] = useState(`[
+  { name: "Data volume", size: 40 },
+  { size: 40000 }
+]`);
+  const [bulkEvsLoading, setBulkEvsLoading] = useState(false);
+  const [bulkEvsSummary, setBulkEvsSummary] = useState("");
+  const [bulkEvsResults, setBulkEvsResults] = useState<BulkEvsMatch[]>([]);
 
   const [estimateLoading, setEstimateLoading] = useState(false);
   const [estimateResult, setEstimateResult] = useState<ReplayResult | null>(null);
@@ -1090,8 +1398,10 @@ export default function Home() {
 
   const normalizedCookie = extractMinimalCookie(cookie);
   const flavors = getCatalogFlavors(catalogResult?.response.body);
+  const disks = getCatalogDisks(catalogResult?.response.body);
   const deferredCatalogSearch = useDeferredValue(catalogSearch);
   const deferredSelectedCartKey = useDeferredValue(selectedCartKey);
+  const pricingModeOptions = useMemo(() => getPricingModeOptions(selectedService), [selectedService]);
   const cartsSorted = useMemo(() => {
     return [...carts].sort((left, right) => (right.updateTime ?? 0) - (left.updateTime ?? 0));
   }, [carts]);
@@ -1114,8 +1424,13 @@ export default function Home() {
       });
   }, [catalogMinRam, catalogMinVcpu, catalogPricingMode, catalogSort, deferredCatalogSearch, flavors]);
   const selectedFlavor = getSelectedFlavor(flavors, selectedFlavorCode);
+  const selectedDisk = disks.find((disk) => disk.resourceSpecCode === configDiskType) ?? null;
   const selectedFlavorPrice = selectedFlavor ? getFlavorBasePrice(selectedFlavor, catalogPricingMode) : Number.POSITIVE_INFINITY;
   const selectedFlavorSupportsPricingMode = Number.isFinite(selectedFlavorPrice);
+  const selectedDiskPrice = selectedDisk && selectedService === "evs"
+    ? getDiskBasePrice(selectedDisk, catalogPricingMode as Exclude<CatalogPricingMode, "RI">)
+    : Number.POSITIVE_INFINITY;
+  const selectedDiskSupportsPricingMode = selectedService === "evs" && Number.isFinite(selectedDiskPrice);
   const estimateBody = estimateResult?.response.body as PriceResponseBody | undefined;
   const stagedTotal = calculatorItems.reduce((sum, item) => sum + item.totalAmount, 0);
   const currentCartDetail = selectedCartKey ? cartDetailCache[selectedCartKey] ?? null : null;
@@ -1130,6 +1445,7 @@ export default function Home() {
   const paginatedCarts = cartsSorted.slice((cartPage - 1) * cartsPerPage, cartPage * cartsPerPage);
   const paginatedFlavors = filteredFlavors.slice((flavorPage - 1) * flavorsPerPage, flavorPage * flavorsPerPage);
   const catalogRegionOptions = useMemo(() => mergeCatalogRegions(catalogRegions, catalogRegion), [catalogRegion, catalogRegions]);
+  const serviceOptions = SERVICE_OPTIONS;
   const configDiskTypeOptions = useMemo(() => withCurrentOption(
     DISK_TYPE_OPTIONS.map((option) => option.apiCode),
     configDiskType,
@@ -1149,6 +1465,23 @@ export default function Home() {
     ));
     setEstimateResult(null);
   }, [catalogPricingMode]);
+
+  useEffect(() => {
+    const allowedPricingModes = getPricingModeOptions(selectedService).map((option) => option.value);
+    if (!allowedPricingModes.includes(catalogPricingMode)) {
+      setCatalogPricingMode(getDefaultPricingMode(selectedService));
+      return;
+    }
+
+    setEstimateResult(null);
+    if (selectedService === "ecs") {
+      setConfigTitle((current) => current || "Elastic Cloud Server");
+      setConfigDescription((current) => current || "Generated from the custom calculator");
+    } else {
+      setConfigTitle((current) => current || DEFAULT_EVS_TITLE);
+      setConfigDescription((current) => current || DEFAULT_EVS_DESCRIPTION);
+    }
+  }, [catalogPricingMode, selectedService]);
 
   useEffect(() => {
     setCartPage(1);
@@ -1212,6 +1545,42 @@ export default function Home() {
     }
 
     return data;
+  }
+
+  async function fetchEvsCatalog(region: string): Promise<CatalogCacheResult> {
+    const template = findTemplate(templates, "get-product-options-and-info");
+    if (!template) {
+      throw new Error("Catalog template is missing");
+    }
+
+    const url = new URL(template.url);
+    url.searchParams.set("urlPath", "evs");
+    url.searchParams.set("region", region);
+
+    const response = await fetch("/api/replay", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: "get-product-options-and-info",
+        url: url.toString(),
+        useCapturedAuth: false,
+      }),
+    });
+
+    const data = (await response.json()) as CatalogCacheResult;
+    if (!response.ok) {
+      throw new Error(data.error ?? `EVS catalog lookup failed with status ${response.status}`);
+    }
+
+    return {
+      ...data,
+      cache: {
+        ...(data.cache ?? {}),
+        source: "remote-evs-catalog",
+        region,
+      },
+      regions: catalogRegions,
+    };
   }
 
   const loadCartDetail = useCallback(async (key: string, force = false) => {
@@ -1317,37 +1686,58 @@ export default function Home() {
     });
   }, [calculatorItems, remoteCartItems]);
 
-  async function loadCatalogForRegion(region: string, preferredFlavorCode?: string) {
+  async function loadCatalogForRegion(
+    region: string,
+    preferredResourceCode?: string,
+    service: CalculatorService = selectedService,
+  ) {
     setCatalogLoading(true);
     setAppError("");
 
     try {
       const nextRegion = region.trim() || DEFAULT_REGION;
       setCatalogRegion(nextRegion);
-      const result = await fetchCatalogFromCache(nextRegion);
+      const result = service === "ecs"
+        ? await fetchCatalogFromCache(nextRegion)
+        : await fetchEvsCatalog(nextRegion);
       setCatalogResult(result);
       setCatalogRegions((current) => mergeCatalogRegions(result.regions ?? current, nextRegion));
 
-      const nextFlavors = getCatalogFlavors(result.response.body);
-      const preferred = preferredFlavorCode
-        ? nextFlavors.find((flavor) => flavor.resourceSpecCode === preferredFlavorCode)
-        : nextFlavors[0];
+      if (service === "ecs") {
+        const nextFlavors = getCatalogFlavors(result.response.body);
+        const preferred = preferredResourceCode
+          ? nextFlavors.find((flavor) => flavor.resourceSpecCode === preferredResourceCode)
+          : nextFlavors[0];
 
-      if (preferred) {
-        setSelectedFlavorCode(preferred.resourceSpecCode);
-        setConfigTitle((current) => current || preferred.resourceSpecCode);
+        if (preferred) {
+          setSelectedFlavorCode(preferred.resourceSpecCode);
+          setConfigTitle((current) => current || preferred.resourceSpecCode);
+        }
+
+        return nextFlavors;
       }
 
-      return nextFlavors;
+      const nextDisks = getCatalogDisks(result.response.body).filter((disk) => (
+        DISK_TYPE_OPTIONS.some((option) => option.apiCode === disk.resourceSpecCode)
+      ));
+      const preferred = preferredResourceCode
+        ? nextDisks.find((disk) => disk.resourceSpecCode === preferredResourceCode)
+        : nextDisks.find((disk) => disk.resourceSpecCode === configDiskType) ?? nextDisks[0];
+
+      if (preferred) {
+        setConfigDiskType(preferred.resourceSpecCode);
+      }
+
+      return nextDisks;
     } catch (error) {
       setAppError(error instanceof Error ? error.message : "Failed to load catalog");
-      return [] as ProductFlavor[];
+      return [] as Array<ProductFlavor | ProductDisk>;
     } finally {
       setCatalogLoading(false);
     }
   }
 
-  async function buildBulkCalculatorItems() {
+  async function buildBulkEcsCalculatorItems() {
     const editTemplate = findTemplate(templates, "edit-cart");
     if (!editTemplate || typeof editTemplate.bodyJson !== "object" || !editTemplate.bodyJson) {
       setAppError("Edit cart template is missing");
@@ -1401,7 +1791,7 @@ export default function Home() {
       }
 
       const description = `${descriptionBase} - minimum ${request.vcpus} vCPU / ${request.ram} GB RAM`;
-      const item = buildCalculatorItem(sampleItem, flavor, estimate, {
+      const item = buildEcsCalculatorItem(sampleItem, flavor, estimate, {
         region: nextRegion,
         quantity,
         durationValue,
@@ -1429,7 +1819,7 @@ export default function Home() {
     setCatalogRegions((current) => mergeCatalogRegions(pricingCatalog.regions ?? current, nextRegion));
     setCatalogRegion(nextRegion);
     if (matchedItems[0]) {
-      setSelectedFlavorCode(matchedItems[0].item.flavorCode);
+      setSelectedFlavorCode(matchedItems[0].item.resourceCode);
     }
 
     return {
@@ -1444,7 +1834,7 @@ export default function Home() {
     setAppError("");
 
     try {
-      const resolved = await buildBulkCalculatorItems();
+      const resolved = await buildBulkEcsCalculatorItems();
       if (!resolved) {
         return;
       }
@@ -1471,7 +1861,7 @@ export default function Home() {
     setAppError("");
 
     try {
-      const resolved = await buildBulkCalculatorItems();
+      const resolved = await buildBulkEcsCalculatorItems();
       if (!resolved) {
         return;
       }
@@ -1501,7 +1891,156 @@ export default function Home() {
     }
   }
 
+  async function buildBulkEvsCalculatorItems() {
+    const editTemplate = findTemplate(templates, "edit-cart");
+    if (!editTemplate || typeof editTemplate.bodyJson !== "object" || !editTemplate.bodyJson) {
+      setAppError("Edit cart template is missing");
+      return null;
+    }
+
+    const requests = parseBulkEvsRequests(bulkEvsInput);
+    const nextRegion = catalogRegion.trim() || DEFAULT_REGION;
+    const pricingCatalog = isCatalogLoadedForRegion(catalogResult, nextRegion) && catalogResult
+      ? catalogResult
+      : await fetchEvsCatalog(nextRegion);
+    const sampleBody = editTemplate.bodyJson as EditCartPayload;
+    const sampleItem = sampleBody.cartListData[0];
+
+    if (!sampleItem) {
+      throw new Error("Edit cart template does not include a sample product item");
+    }
+
+    const quantity = Number.parseInt(configQuantity, 10) || 1;
+    const durationValue = getNormalizedDurationValue(catalogPricingMode, configHours);
+    const defaultType = bulkDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE;
+    const descriptionBase = configDescription.trim() || DEFAULT_EVS_DESCRIPTION;
+    const diskMap = new Map(getCatalogDisks(pricingCatalog.response.body).map((disk) => [disk.resourceSpecCode, disk]));
+    const items: CalculatorItem[] = [];
+    const matches: BulkEvsMatch[] = [];
+
+    for (const request of requests) {
+      const diskType = request.type?.trim() || defaultType;
+      const disk = diskMap.get(diskType);
+      if (!disk) {
+        throw new Error(`Disk type ${diskType} is unavailable in ${nextRegion}`);
+      }
+
+      const diskSizes = splitDiskSize(request.size);
+      if (!diskSizes.length) {
+        throw new Error("Each EVS request must include a positive size");
+      }
+
+      let totalAmount = 0;
+      for (const [index, chunkSize] of diskSizes.entries()) {
+        const estimate = buildCatalogDiskPriceEstimate(pricingCatalog.response.body, {
+          diskType,
+          diskSize: chunkSize,
+          durationValue,
+          quantity,
+          pricingMode: catalogPricingMode as Exclude<CatalogPricingMode, "RI">,
+        });
+
+        if (!estimate) {
+          throw new Error(`Cached ${getPricingModeLabel(catalogPricingMode, "evs")} pricing is unavailable for ${diskType} in ${nextRegion}`);
+        }
+
+        totalAmount += estimate.amount;
+        items.push(buildEvsCalculatorItem(sampleItem, disk, estimate, {
+          region: nextRegion,
+          quantity,
+          durationValue,
+          pricingMode: catalogPricingMode as Exclude<CatalogPricingMode, "RI">,
+          diskType,
+          diskSize: chunkSize,
+          title: buildSplitDiskTitle(request.name?.trim() || DEFAULT_EVS_TITLE, index, diskSizes.length),
+          description: descriptionBase,
+        }));
+      }
+
+      matches.push({
+        request,
+        diskType,
+        diskSizes,
+        totalAmount,
+        currency: "USD",
+      });
+    }
+
+    setCatalogResult(pricingCatalog);
+    setCatalogRegions((current) => mergeCatalogRegions(pricingCatalog.regions ?? current, nextRegion));
+    setCatalogRegion(nextRegion);
+
+    return {
+      items,
+      matches,
+      region: nextRegion,
+    };
+  }
+
+  async function addBulkEvsToDraft() {
+    setBulkEvsLoading(true);
+    setAppError("");
+
+    try {
+      const resolved = await buildBulkEvsCalculatorItems();
+      if (!resolved) {
+        return;
+      }
+
+      setCalculatorItems((current) => [...current, ...resolved.items]);
+      setBulkEvsResults(resolved.matches);
+      setBulkEvsSummary(`Added ${resolved.items.length} EVS items to the draft queue.`);
+    } catch (error) {
+      setBulkEvsResults([]);
+      setBulkEvsSummary("");
+      setAppError(error instanceof Error ? error.message : "Failed to build the EVS list");
+    } finally {
+      setBulkEvsLoading(false);
+    }
+  }
+
+  async function appendBulkEvsToSelectedCart() {
+    if (!selectedCartKey.trim()) {
+      setAppError("Select or create a Huawei cart first");
+      return;
+    }
+
+    setBulkEvsLoading(true);
+    setAppError("");
+
+    try {
+      const resolved = await buildBulkEvsCalculatorItems();
+      if (!resolved) {
+        return;
+      }
+
+      const detail = currentCartDetail ?? await loadCartDetail(selectedCartKey.trim(), false);
+      if (!detail) {
+        throw new Error("Load the selected cart before appending EVS items");
+      }
+
+      const nextItems = [
+        ...(detail.cartListData ?? []).map((item) => cloneJson(item as CalculatorCartItemPayload)),
+        ...resolved.items.map((item) => cloneJson(item.payload)),
+      ];
+
+      const result = await updateLiveCartItems(nextItems);
+      if (result) {
+        setCalculatorItems((current) => [...current, ...resolved.items]);
+        setBulkEvsResults(resolved.matches);
+        setBulkEvsSummary(`Added ${resolved.items.length} EVS items to ${selectedCartName.trim() || "the selected cart"}.`);
+      }
+    } catch (error) {
+      setBulkEvsResults([]);
+      setBulkEvsSummary("");
+      setAppError(error instanceof Error ? error.message : "Failed to append the EVS list to the selected cart");
+    } finally {
+      setBulkEvsLoading(false);
+    }
+  }
+
   function populateEditorFromDraftItem(item: CalculatorItem) {
+    setSelectedService(item.service);
     setEditorTarget({ kind: "draft", id: item.id });
     setCatalogPricingMode(item.pricingMode);
     setConfigQuantity(String(item.quantity));
@@ -1510,12 +2049,17 @@ export default function Home() {
     setConfigDiskSize(String(item.diskSize));
     setConfigTitle(item.title);
     setConfigDescription(item.description);
-    setSelectedFlavorCode(item.flavorCode);
     setEstimateResult(null);
-    void loadCatalogForRegion(item.region, item.flavorCode);
+    if (item.service === "ecs") {
+      setSelectedFlavorCode(item.resourceCode);
+      void loadCatalogForRegion(item.region, item.resourceCode, "ecs");
+      return;
+    }
+    void loadCatalogForRegion(item.region, item.diskType, "evs");
   }
 
   function populateEditorFromRemoteItem(item: RemoteCartItem) {
+    setSelectedService(item.service);
     setEditorTarget({ kind: "remote", id: item.id });
     setCatalogPricingMode(item.pricingMode);
     setConfigQuantity(String(item.quantity));
@@ -1524,9 +2068,13 @@ export default function Home() {
     setConfigDiskSize(String(item.diskSize));
     setConfigTitle(item.title);
     setConfigDescription(item.description);
-    setSelectedFlavorCode(item.flavorCode);
     setEstimateResult(null);
-    void loadCatalogForRegion(item.region, item.flavorCode);
+    if (item.service === "ecs") {
+      setSelectedFlavorCode(item.resourceCode);
+      void loadCatalogForRegion(item.region, item.resourceCode, "ecs");
+      return;
+    }
+    void loadCatalogForRegion(item.region, item.diskType, "evs");
   }
 
   function cancelEditor() {
@@ -1576,20 +2124,10 @@ export default function Home() {
   }
 
   async function loadCatalog() {
-    await loadCatalogForRegion(catalogRegion);
+    await loadCatalogForRegion(catalogRegion, selectedService === "ecs" ? selectedFlavorCode : configDiskType, selectedService);
   }
 
   async function estimatePrice() {
-    if (!selectedFlavor) {
-      setAppError("Select a flavor before estimating price");
-      return;
-    }
-
-    if (!selectedFlavorSupportsPricingMode) {
-      setAppError(`${selectedFlavor.resourceSpecCode} does not expose ${getPricingModeLabel(catalogPricingMode)} pricing in the cached Huawei catalog`);
-      return;
-    }
-
     setEstimateLoading(true);
     setAppError("");
 
@@ -1600,33 +2138,104 @@ export default function Home() {
       const nextRegion = catalogRegion.trim() || DEFAULT_REGION;
       const pricingCatalog = nextRegion === catalogRegion.trim() && catalogResult
         ? catalogResult
-        : await fetchCatalogFromCache(nextRegion);
-      const estimate = buildCatalogPriceEstimate(pricingCatalog.response.body, {
-        flavorCode: selectedFlavor.resourceSpecCode,
-        diskType: configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
-        diskSize,
-        durationValue,
-        quantity,
-        pricingMode: catalogPricingMode,
-      });
-      if (!estimate) {
-        throw new Error(`Cached ${getPricingModeLabel(catalogPricingMode)} pricing data is unavailable for ${selectedFlavor.resourceSpecCode} in ${nextRegion}`);
+        : await (selectedService === "ecs" ? fetchCatalogFromCache(nextRegion) : fetchEvsCatalog(nextRegion));
+      let estimate: PriceResponseBody | null = null;
+      let estimateResultPayload: ReplayResult;
+
+      if (selectedService === "ecs") {
+        if (!selectedFlavor) {
+          throw new Error("Select a flavor before estimating price");
+        }
+        if (!selectedFlavorSupportsPricingMode) {
+          throw new Error(`${selectedFlavor.resourceSpecCode} does not expose ${getPricingModeLabel(catalogPricingMode)} pricing in the cached Huawei catalog`);
+        }
+
+        estimate = buildCatalogPriceEstimate(pricingCatalog.response.body, {
+          flavorCode: selectedFlavor.resourceSpecCode,
+          diskType: configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
+          diskSize,
+          durationValue,
+          quantity,
+          pricingMode: catalogPricingMode,
+        });
+        if (!estimate) {
+          throw new Error(`Cached ${getPricingModeLabel(catalogPricingMode)} pricing data is unavailable for ${selectedFlavor.resourceSpecCode} in ${nextRegion}`);
+        }
+
+        estimateResultPayload = buildCachedEstimateResult(
+          estimate,
+          nextRegion,
+          selectedFlavor.resourceSpecCode,
+          configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
+          diskSize,
+          durationValue,
+          quantity,
+          catalogPricingMode,
+        );
+      } else {
+        if (!selectedDisk) {
+          throw new Error("Load EVS disk types and select one before estimating price");
+        }
+        if (!selectedDiskSupportsPricingMode) {
+          throw new Error(`${getDiskTypeDisplayName(selectedDisk.resourceSpecCode)} does not expose ${getPricingModeLabel(catalogPricingMode, "evs")} pricing in the EVS catalog for ${nextRegion}`);
+        }
+
+        const chunkSizes = splitDiskSize(diskSize);
+        const chunkEstimates = chunkSizes.map((chunkSize) => buildCatalogDiskPriceEstimate(pricingCatalog.response.body, {
+          diskType: configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
+          diskSize: chunkSize,
+          durationValue,
+          quantity,
+          pricingMode: catalogPricingMode as Exclude<CatalogPricingMode, "RI">,
+        }));
+
+        if (chunkEstimates.some((entry) => !entry)) {
+          throw new Error(`Cached ${getPricingModeLabel(catalogPricingMode, "evs")} pricing data is unavailable for ${getDiskTypeDisplayName(configDiskType)} in ${nextRegion}`);
+        }
+
+        estimate = {
+          amount: Number(chunkEstimates.reduce((sum, entry) => sum + (entry?.amount ?? 0), 0).toFixed(5)),
+          discountAmount: 0,
+          originalAmount: Number(chunkEstimates.reduce((sum, entry) => sum + (entry?.originalAmount ?? 0), 0).toFixed(5)),
+          currency: chunkEstimates[0]?.currency ?? "USD",
+          productRatingResult: chunkEstimates.flatMap((entry) => entry?.productRatingResult ?? []),
+        };
+
+        estimateResultPayload = {
+          endpoint: {
+            id: "cached-disk-price-estimate",
+            name: "Cached EVS price estimate",
+          },
+          request: {
+            method: "POST",
+            url: `/api/replay?id=get-product-options-and-info&service=evs&region=${encodeURIComponent(nextRegion)}`,
+            headers: {},
+            bodyRaw: JSON.stringify({
+              region: nextRegion,
+              diskType: configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
+              diskSize,
+              durationValue,
+              quantity,
+              pricingMode: catalogPricingMode,
+            }),
+            useCapturedAuth: false,
+          },
+          response: {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            contentType: "application/json",
+            durationMs: 0,
+            body: estimate,
+            rawTextPreview: JSON.stringify(estimate).slice(0, 1200),
+          },
+          testedAt: new Date().toISOString(),
+        };
       }
 
       setCatalogResult(pricingCatalog);
       setCatalogRegions((current) => mergeCatalogRegions(pricingCatalog.regions ?? current, nextRegion));
-
-      const result = buildCachedEstimateResult(
-        estimate,
-        nextRegion,
-        selectedFlavor.resourceSpecCode,
-        configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
-        diskSize,
-        durationValue,
-        quantity,
-        catalogPricingMode,
-      );
-      setEstimateResult(result);
+      setEstimateResult(estimateResultPayload);
     } catch (error) {
       setAppError(error instanceof Error ? error.message : "Failed to estimate price");
     } finally {
@@ -1641,7 +2250,7 @@ export default function Home() {
       return;
     }
 
-    if (!selectedFlavor || !estimateBody) {
+    if (!estimateBody) {
       setAppError("Estimate price before adding the item");
       return;
     }
@@ -1651,25 +2260,77 @@ export default function Home() {
     const quantity = Number.parseInt(configQuantity, 10) || 1;
     const durationValue = getNormalizedDurationValue(catalogPricingMode, configHours);
     const diskSize = Number.parseInt(configDiskSize, 10) || 40;
+    const nextRegion = catalogRegion.trim() || DEFAULT_REGION;
 
-    const item = buildCalculatorItem(sampleItem, selectedFlavor, estimateBody, {
-      id: editingDraftItem?.id,
-      region: catalogRegion.trim() || DEFAULT_REGION,
-      quantity,
-      durationValue,
-      pricingMode: catalogPricingMode,
-      diskType: configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
-      diskSize,
-      title: configTitle.trim() || selectedFlavor.resourceSpecCode,
-      description: configDescription.trim() || "Generated from the custom calculator",
+    if (selectedService === "ecs") {
+      if (!selectedFlavor) {
+        setAppError("Select a flavor before adding the item");
+        return;
+      }
+
+      const item = buildEcsCalculatorItem(sampleItem, selectedFlavor, estimateBody, {
+        id: editingDraftItem?.id,
+        region: nextRegion,
+        quantity,
+        durationValue,
+        pricingMode: catalogPricingMode,
+        diskType: configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
+        diskSize,
+        title: configTitle.trim() || selectedFlavor.resourceSpecCode,
+        description: configDescription.trim() || "Generated from the custom calculator",
+      });
+
+      setCalculatorItems((current) => {
+        if (!editingDraftItem) {
+          return [...current, item];
+        }
+
+        return current.map((currentItem) => (currentItem.id === editingDraftItem.id ? item : currentItem));
+      });
+      setEditorTarget(null);
+      return;
+    }
+
+    if (!selectedDisk) {
+      setAppError("Load EVS disk types before adding the item");
+      return;
+    }
+
+    const chunkSizes = splitDiskSize(diskSize);
+    const items = chunkSizes.map((chunkSize, index) => {
+      const chunkEstimate = buildCatalogDiskPriceEstimate(catalogResult?.response.body, {
+        diskType: configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
+        diskSize: chunkSize,
+        durationValue,
+        quantity,
+        pricingMode: catalogPricingMode as Exclude<CatalogPricingMode, "RI">,
+      });
+      if (!chunkEstimate) {
+        throw new Error(`Unable to build the EVS payload for ${getDiskTypeDisplayName(configDiskType)}`);
+      }
+
+      return buildEvsCalculatorItem(sampleItem, selectedDisk, chunkEstimate, {
+        id: editingDraftItem && chunkSizes.length === 1 ? editingDraftItem.id : undefined,
+        region: nextRegion,
+        quantity,
+        durationValue,
+        pricingMode: catalogPricingMode as Exclude<CatalogPricingMode, "RI">,
+        diskType: configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
+        diskSize: chunkSize,
+        title: buildSplitDiskTitle(configTitle.trim() || DEFAULT_EVS_TITLE, index, chunkSizes.length),
+        description: configDescription.trim() || DEFAULT_EVS_DESCRIPTION,
+      });
     });
 
     setCalculatorItems((current) => {
       if (!editingDraftItem) {
-        return [...current, item];
+        return [...current, ...items];
       }
 
-      return current.map((currentItem) => (currentItem.id === editingDraftItem.id ? item : currentItem));
+      const nextItems = current.filter((currentItem) => currentItem.id !== editingDraftItem.id);
+      const editIndex = current.findIndex((currentItem) => currentItem.id === editingDraftItem.id);
+      nextItems.splice(editIndex >= 0 ? editIndex : nextItems.length, 0, ...items);
+      return nextItems;
     });
     setEditorTarget(null);
   }
@@ -1879,7 +2540,7 @@ export default function Home() {
       return;
     }
 
-    if (!selectedFlavor || !estimateBody) {
+    if (!estimateBody) {
       setAppError("Estimate the updated price before saving the live cart item");
       return;
     }
@@ -1888,22 +2549,63 @@ export default function Home() {
     const durationValue = getNormalizedDurationValue(catalogPricingMode, configHours);
     const diskSize = Number.parseInt(configDiskSize, 10) || 40;
 
-    const nextPayload = buildCalculatorItemPayload(editingRemoteItem.payload, selectedFlavor, estimateBody, {
-      region: catalogRegion.trim() || editingRemoteItem.region,
-      quantity,
-      durationValue,
-      pricingMode: catalogPricingMode,
-      diskType: configDiskType.trim() || editingRemoteItem.diskType,
-      diskSize,
-      title: configTitle.trim() || selectedFlavor.resourceSpecCode,
-      description: configDescription.trim() || editingRemoteItem.description,
-    });
+    let replacementItems: CalculatorCartItemPayload[] = [];
+    if (editingRemoteItem.service === "ecs") {
+      if (!selectedFlavor) {
+        setAppError("Select a flavor before saving the live cart item");
+        return;
+      }
 
-    const nextItems = currentCartDetail.cartListData.map((item, index) => (
-      index === editingRemoteItem.index
-        ? nextPayload
-        : cloneJson(item as CalculatorCartItemPayload)
-    ));
+      replacementItems = [
+        buildEcsCalculatorItemPayload(editingRemoteItem.payload, selectedFlavor, estimateBody, {
+          region: catalogRegion.trim() || editingRemoteItem.region,
+          quantity,
+          durationValue,
+          pricingMode: catalogPricingMode,
+          diskType: configDiskType.trim() || editingRemoteItem.diskType,
+          diskSize,
+          title: configTitle.trim() || selectedFlavor.resourceSpecCode,
+          description: configDescription.trim() || editingRemoteItem.description,
+        }),
+      ];
+    } else {
+      if (!selectedDisk) {
+        setAppError("Load EVS disk types before saving the live cart item");
+        return;
+      }
+
+      const chunkSizes = splitDiskSize(diskSize);
+      replacementItems = chunkSizes.map((chunkSize, index) => {
+        const chunkEstimate = buildCatalogDiskPriceEstimate(catalogResult?.response.body, {
+          diskType: configDiskType.trim() || editingRemoteItem.diskType,
+          diskSize: chunkSize,
+          durationValue,
+          quantity,
+          pricingMode: catalogPricingMode as Exclude<CatalogPricingMode, "RI">,
+        });
+        if (!chunkEstimate) {
+          throw new Error(`Unable to update ${getDiskTypeDisplayName(configDiskType)}`);
+        }
+
+        return buildEvsCalculatorItemPayload(editingRemoteItem.payload, selectedDisk, chunkEstimate, {
+          region: catalogRegion.trim() || editingRemoteItem.region,
+          quantity,
+          durationValue,
+          pricingMode: catalogPricingMode as Exclude<CatalogPricingMode, "RI">,
+          diskType: configDiskType.trim() || editingRemoteItem.diskType,
+          diskSize: chunkSize,
+          title: buildSplitDiskTitle(configTitle.trim() || DEFAULT_EVS_TITLE, index, chunkSizes.length),
+          description: configDescription.trim() || editingRemoteItem.description,
+        });
+      });
+    }
+
+    const nextItems = currentCartDetail.cartListData
+      .flatMap((item, index) => (
+        index === editingRemoteItem.index
+          ? replacementItems.map((replacement) => cloneJson(replacement))
+          : [cloneJson(item as CalculatorCartItemPayload)]
+      ));
 
     const result = await updateLiveCartItems(nextItems);
     if (result) {
@@ -1980,15 +2682,41 @@ export default function Home() {
 
       <main className="mx-auto max-w-[1500px] space-y-6">
         <section className="hero-card">
+          <div className="mb-5 flex flex-wrap gap-3">
+            {serviceOptions.map((service) => (
+              <button
+                key={service.value}
+                className={selectedService === service.value ? "btn btn-primary" : "btn btn-secondary"}
+                onClick={() => {
+                  setSelectedService(service.value);
+                  setEditorTarget(null);
+                  setEstimateResult(null);
+                  if (service.value === "ecs") {
+                    setConfigTitle("Elastic Cloud Server");
+                    setConfigDescription("Generated from the custom calculator");
+                  } else {
+                    setConfigTitle(DEFAULT_EVS_TITLE);
+                    setConfigDescription(DEFAULT_EVS_DESCRIPTION);
+                  }
+                }}
+                type="button"
+              >
+                {service.label}
+              </button>
+            ))}
+          </div>
           <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-3xl">
               <p className="eyebrow">Huawei Cloud Style Calculator</p>
               <h1 className="mt-3 text-4xl font-semibold tracking-tight sm:text-5xl">
-                Build an ECS proposal, price it, and publish it into a Huawei cart.
+                {selectedService === "ecs"
+                  ? "Build an ECS proposal, price it, and publish it into a Huawei cart."
+                  : "Build EVS disks, price them, and publish them into a Huawei cart."}
               </h1>
               <p className="mt-4 text-base leading-7 text-slate-600">
-                Choose a target cart, browse flavors, configure compute and disk, estimate cost, stage multiple
-                products, and then write the calculator state into the selected share cart.
+                {selectedService === "ecs"
+                  ? "Choose a target cart, browse flavors, configure compute and disk, estimate cost, stage multiple products, and then write the calculator state into the selected share cart."
+                  : "Choose a target cart, pick EVS types and sizes, split oversized disks automatically, stage multiple volumes, and then write the calculator state into the selected share cart."}
               </p>
             </div>
 
@@ -2161,7 +2889,7 @@ export default function Home() {
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="font-semibold text-slate-900">{item.title}</p>
-                          <p className="mt-1 text-sm text-slate-600">{item.flavorCode}</p>
+                          <p className="mt-1 text-sm text-slate-600">{item.service === "ecs" ? item.resourceCode : formatDiskLabel(item.diskType, item.diskSize)}</p>
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="pill">{item.totalAmount.toFixed(2)}</span>
@@ -2175,11 +2903,12 @@ export default function Home() {
                       </div>
                       <p className="mt-2 text-sm text-slate-600">{item.description}</p>
                       <div className="mt-3 flex flex-wrap gap-2">
+                        <span className="pill">{item.service.toUpperCase()}</span>
                         <span className="pill">{item.region}</span>
-                        <span className="pill">{getPricingModeLabel(item.pricingMode)}</span>
+                        <span className="pill">{getPricingModeLabel(item.pricingMode, item.service)}</span>
                         <span className="pill">{item.quantity}x</span>
                         {item.pricingMode === "RI" ? null : <span className="pill">{formatDuration(item.pricingMode, item.hours)}</span>}
-                        <span className="pill">{item.diskLabel}</span>
+                        {item.service === "ecs" ? <span className="pill">{item.diskLabel}</span> : null}
                       </div>
                     </div>
                   ))
@@ -2218,7 +2947,7 @@ export default function Home() {
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="font-semibold text-slate-900">{item.title}</p>
-                          <p className="mt-1 text-sm text-slate-600">{item.flavorCode}</p>
+                          <p className="mt-1 text-sm text-slate-600">{item.service === "ecs" ? item.resourceCode : formatDiskLabel(item.diskType, item.diskSize)}</p>
                         </div>
                         <div className="flex items-center gap-2">
                           <button className="btn btn-secondary btn-small" onClick={() => populateEditorFromDraftItem(item)} type="button">
@@ -2230,7 +2959,8 @@ export default function Home() {
                         </div>
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
-                        <span className="pill">{getPricingModeLabel(item.pricingMode)}</span>
+                        <span className="pill">{item.service.toUpperCase()}</span>
+                        <span className="pill">{getPricingModeLabel(item.pricingMode, item.service)}</span>
                         <span className="pill">{item.quantity}x</span>
                         {item.pricingMode === "RI" ? null : <span className="pill">{formatDuration(item.pricingMode, item.hours)}</span>}
                         <span className="pill">{formatDiskLabel(item.diskType, item.diskSize)}</span>
@@ -2239,7 +2969,7 @@ export default function Home() {
                     </div>
                   ))
                 ) : (
-                  <p className="text-sm text-slate-500">The selected cart draft is empty. Add products from the flavor matrix.</p>
+                  <p className="text-sm text-slate-500">The selected cart draft is empty. Add products from the calculator panel.</p>
                 )}
               </div>
 
@@ -2268,7 +2998,9 @@ export default function Home() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="eyebrow">Step 2</p>
-                  <h2 className="mt-1 text-2xl font-semibold">Browse ECS flavors</h2>
+                  <h2 className="mt-1 text-2xl font-semibold">
+                    {selectedService === "ecs" ? "Browse ECS flavors" : "Browse EVS disk types"}
+                  </h2>
                 </div>
                 <div className="flex flex-wrap items-end gap-3">
                   <div>
@@ -2288,7 +3020,7 @@ export default function Home() {
                       Pricing type
                     </label>
                     <select className="field min-w-[180px]" id="catalog-pricing-mode" onChange={(event) => setCatalogPricingMode(event.target.value as CatalogPricingMode)} value={catalogPricingMode}>
-                      {PRICING_MODE_OPTIONS.map((option) => (
+                      {pricingModeOptions.map((option) => (
                         <option key={option.value} value={option.value}>
                           {option.label}
                         </option>
@@ -2296,118 +3028,151 @@ export default function Home() {
                     </select>
                   </div>
                   <button className="btn btn-primary" disabled={catalogLoading || loadingTemplates} onClick={() => void loadCatalog()} type="button">
-                    {catalogLoading ? "Loading..." : "Load flavors"}
+                    {catalogLoading ? "Loading..." : selectedService === "ecs" ? "Load flavors" : "Load disk types"}
                   </button>
                 </div>
               </div>
 
-              <div className="mt-5 grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
-                <div className="soft-panel">
-                  <p className="section-title">Filter flavors</p>
-                  <label className="label mt-3" htmlFor="catalog-search">
-                    Search
-                  </label>
-                  <input
-                    className="field"
-                    id="catalog-search"
-                    onChange={(event) => setCatalogSearch(event.target.value)}
-                    placeholder="Flavor, workload, or spec"
-                    value={catalogSearch}
-                  />
+              {selectedService === "ecs" ? (
+                <div className="mt-5 grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
+                  <div className="soft-panel">
+                    <p className="section-title">Filter flavors</p>
+                    <label className="label mt-3" htmlFor="catalog-search">
+                      Search
+                    </label>
+                    <input
+                      className="field"
+                      id="catalog-search"
+                      onChange={(event) => setCatalogSearch(event.target.value)}
+                      placeholder="Flavor, workload, or spec"
+                      value={catalogSearch}
+                    />
 
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                    <div>
-                      <label className="label" htmlFor="catalog-min-vcpu">
-                        Min vCPU
-                      </label>
-                      <input className="field" id="catalog-min-vcpu" onChange={(event) => setCatalogMinVcpu(event.target.value)} value={catalogMinVcpu} />
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                      <div>
+                        <label className="label" htmlFor="catalog-min-vcpu">
+                          Min vCPU
+                        </label>
+                        <input className="field" id="catalog-min-vcpu" onChange={(event) => setCatalogMinVcpu(event.target.value)} value={catalogMinVcpu} />
+                      </div>
+                      <div>
+                        <label className="label" htmlFor="catalog-min-ram">
+                          Min RAM (GB)
+                        </label>
+                        <input className="field" id="catalog-min-ram" onChange={(event) => setCatalogMinRam(event.target.value)} value={catalogMinRam} />
+                      </div>
                     </div>
-                    <div>
-                      <label className="label" htmlFor="catalog-min-ram">
-                        Min RAM (GB)
-                      </label>
-                      <input className="field" id="catalog-min-ram" onChange={(event) => setCatalogMinRam(event.target.value)} value={catalogMinRam} />
+
+                    <label className="label mt-3" htmlFor="catalog-sort">
+                      Sort by base price
+                    </label>
+                    <select
+                      className="field"
+                      id="catalog-sort"
+                      onChange={(event) => setCatalogSort(event.target.value)}
+                      value={catalogSort}
+                    >
+                      <option value="price-asc">Lowest first</option>
+                      <option value="price-desc">Highest first</option>
+                    </select>
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <span className="pill">{filteredFlavors.length} shown</span>
+                      <span className="pill">{flavors.length} total</span>
+                      <span className="pill">Page {flavorPage} / {totalFlavorPages}</span>
                     </div>
                   </div>
 
-                  <label className="label mt-3" htmlFor="catalog-sort">
-                    Sort by base price
-                  </label>
-                  <select
-                    className="field"
-                    id="catalog-sort"
-                    onChange={(event) => setCatalogSort(event.target.value)}
-                    value={catalogSort}
-                  >
-                    <option value="price-asc">Lowest first</option>
-                    <option value="price-desc">Highest first</option>
-                  </select>
+                  <div className="soft-panel">
+                    <div className="flavor-matrix-header">
+                      <span>Flavor</span>
+                      <span>vCPU</span>
+                      <span>RAM</span>
+                      <span>Type</span>
+                      <span>{getPricingRateLabel(catalogPricingMode)}</span>
+                    </div>
 
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <span className="pill">{filteredFlavors.length} shown</span>
-                    <span className="pill">{flavors.length} total</span>
-                    <span className="pill">Page {flavorPage} / {totalFlavorPages}</span>
+                    <div className="flavor-matrix-body mt-2 space-y-2">
+                      {paginatedFlavors.map((flavor) => (
+                        <button
+                          key={flavor.resourceSpecCode}
+                          className={`flavor-row ${selectedFlavorCode === flavor.resourceSpecCode ? "flavor-row-active" : ""}`}
+                          onClick={() => {
+                            setSelectedFlavorCode(flavor.resourceSpecCode);
+                            setConfigTitle(flavor.resourceSpecCode);
+                            setEstimateResult(null);
+                          }}
+                          type="button"
+                        >
+                          <div>
+                            <p className="font-semibold text-slate-900">{flavor.resourceSpecCode}</p>
+                            <p className="mt-1 text-xs text-slate-500">{flavor.series ?? "ECS"} / {flavor.instanceArch ?? "x86"}</p>
+                          </div>
+                          <div className="text-sm text-slate-700">{getFlavorCpuCount(flavor)}</div>
+                          <div className="text-sm text-slate-700">{getFlavorMemoryGb(flavor).toFixed(0)} GB</div>
+                          <div className="text-sm text-slate-700">{flavor.performType ?? "General"}</div>
+                          <div className="text-sm font-semibold text-slate-900">
+                            {Number.isFinite(getFlavorBasePrice(flavor, catalogPricingMode)) ? getFlavorBasePrice(flavor, catalogPricingMode).toFixed(4) : "-"}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+
+                    {filteredFlavors.length ? (
+                      <div className="pagination-bar mt-4">
+                        <span className="text-sm text-slate-500">
+                          Showing {(flavorPage - 1) * flavorsPerPage + 1}-{Math.min(flavorPage * flavorsPerPage, filteredFlavors.length)} of {filteredFlavors.length}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <button className="btn btn-secondary btn-small" disabled={flavorPage <= 1} onClick={() => setFlavorPage((page) => page - 1)} type="button">
+                            Previous
+                          </button>
+                          <button className="btn btn-secondary btn-small" disabled={flavorPage >= totalFlavorPages} onClick={() => setFlavorPage((page) => page + 1)} type="button">
+                            Next
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {!filteredFlavors.length ? (
+                      <p className="mt-4 text-sm text-slate-500">
+                        No flavors match the current filters. Lower the minimum vCPU or RAM threshold.
+                      </p>
+                    ) : null}
                   </div>
                 </div>
-
-                <div className="soft-panel">
-                  <div className="flavor-matrix-header">
-                    <span>Flavor</span>
-                    <span>vCPU</span>
-                    <span>RAM</span>
-                    <span>Type</span>
-                    <span>{getPricingRateLabel(catalogPricingMode)}</span>
-                  </div>
-
-                  <div className="flavor-matrix-body mt-2 space-y-2">
-                    {paginatedFlavors.map((flavor) => (
+              ) : (
+                <div className="mt-5 grid gap-4 lg:grid-cols-3">
+                  {DISK_TYPE_OPTIONS.map((option) => {
+                    const disk = disks.find((entry) => entry.resourceSpecCode === option.apiCode);
+                    const diskPrice = disk ? getDiskBasePrice(disk, catalogPricingMode as Exclude<CatalogPricingMode, "RI">) : Number.POSITIVE_INFINITY;
+                    return (
                       <button
-                        key={flavor.resourceSpecCode}
-                        className={`flavor-row ${selectedFlavorCode === flavor.resourceSpecCode ? "flavor-row-active" : ""}`}
+                        key={option.apiCode}
+                        className={`result-strip text-left ${configDiskType === option.apiCode ? "border-sky-300 bg-sky-50" : ""}`}
                         onClick={() => {
-                          setSelectedFlavorCode(flavor.resourceSpecCode);
-                          setConfigTitle(flavor.resourceSpecCode);
+                          setConfigDiskType(option.apiCode);
                           setEstimateResult(null);
                         }}
                         type="button"
                       >
-                        <div>
-                          <p className="font-semibold text-slate-900">{flavor.resourceSpecCode}</p>
-                          <p className="mt-1 text-xs text-slate-500">{flavor.series ?? "ECS"} / {flavor.instanceArch ?? "x86"}</p>
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-semibold text-slate-900">{option.label}</p>
+                            <p className="mt-1 text-xs text-slate-500">{option.apiCode}</p>
+                          </div>
+                          <span className="pill">
+                            {Number.isFinite(diskPrice) ? diskPrice.toFixed(4) : "-"}
+                          </span>
                         </div>
-                        <div className="text-sm text-slate-700">{getFlavorCpuCount(flavor)}</div>
-                        <div className="text-sm text-slate-700">{getFlavorMemoryGb(flavor).toFixed(0)} GB</div>
-                        <div className="text-sm text-slate-700">{flavor.performType ?? "General"}</div>
-                        <div className="text-sm font-semibold text-slate-900">
-                          {Number.isFinite(getFlavorBasePrice(flavor, catalogPricingMode)) ? getFlavorBasePrice(flavor, catalogPricingMode).toFixed(4) : "-"}
-                        </div>
+                        <p className="mt-3 text-sm text-slate-600">
+                          {disk?.productSpecSysDesc || "Load the EVS catalog for region-specific pricing."}
+                        </p>
                       </button>
-                    ))}
-                  </div>
-
-                  {filteredFlavors.length ? (
-                    <div className="pagination-bar mt-4">
-                      <span className="text-sm text-slate-500">
-                        Showing {(flavorPage - 1) * flavorsPerPage + 1}-{Math.min(flavorPage * flavorsPerPage, filteredFlavors.length)} of {filteredFlavors.length}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <button className="btn btn-secondary btn-small" disabled={flavorPage <= 1} onClick={() => setFlavorPage((page) => page - 1)} type="button">
-                          Previous
-                        </button>
-                        <button className="btn btn-secondary btn-small" disabled={flavorPage >= totalFlavorPages} onClick={() => setFlavorPage((page) => page + 1)} type="button">
-                          Next
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {!filteredFlavors.length ? (
-                    <p className="mt-4 text-sm text-slate-500">
-                      No flavors match the current filters. Lower the minimum vCPU or RAM threshold.
-                    </p>
-                  ) : null}
+                    );
+                  })}
                 </div>
-              </div>
+              )}
             </div>
 
             <div className="card">
@@ -2477,7 +3242,7 @@ export default function Home() {
                     </div>
                     <div>
                       <label className="label" htmlFor="config-disk-type">
-                        Disk type
+                        EVS type
                       </label>
                       <select className="field" id="config-disk-type" onChange={(event) => setConfigDiskType(event.target.value)} value={configDiskType}>
                         {configDiskTypeOptions.map((option) => (
@@ -2489,9 +3254,14 @@ export default function Home() {
                     </div>
                     <div>
                       <label className="label" htmlFor="config-disk-size">
-                        Disk size (GB)
+                        EVS size (GB)
                       </label>
                       <input className="field" id="config-disk-size" onChange={(event) => setConfigDiskSize(event.target.value)} value={configDiskSize} />
+                      {selectedService === "evs" ? (
+                        <p className="mt-2 text-xs text-slate-500">
+                          Requests over {MAX_EVS_DISK_SIZE_GB} GB are split into multiple disks automatically.
+                        </p>
+                      ) : null}
                     </div>
                   </div>
 
@@ -2502,8 +3272,8 @@ export default function Home() {
                 </div>
 
                 <div className="soft-panel">
-                  <p className="section-title">Selected flavor</p>
-                  {selectedFlavor ? (
+                  <p className="section-title">{selectedService === "ecs" ? "Selected flavor" : "Selected EVS type"}</p>
+                  {selectedService === "ecs" ? (selectedFlavor ? (
                     <>
                       <p className="mt-3 text-2xl font-semibold text-slate-900">{selectedFlavor.resourceSpecCode}</p>
                       <p className="mt-1 text-sm text-slate-600">{getFlavorLabel(selectedFlavor)}</p>
@@ -2511,14 +3281,14 @@ export default function Home() {
                         {getPricingRateLabel(catalogPricingMode)}: {selectedFlavorSupportsPricingMode ? selectedFlavorPrice.toFixed(4) : "-"}
                       </p>
                       <div className="mt-3 flex flex-wrap gap-2">
-                        <span className="pill">{getPricingModeLabel(catalogPricingMode)}</span>
+                        <span className="pill">{getPricingModeLabel(catalogPricingMode, "ecs")}</span>
                         {catalogPricingMode === "RI"
                           ? <span className="pill">Disk pricing excluded</span>
-                          : <span className="pill">Disk: {getPricingModeLabel(getEffectiveDiskPricingMode(catalogPricingMode))}</span>}
+                          : <span className="pill">Disk: {getPricingModeLabel(getEffectiveDiskPricingMode(catalogPricingMode), "ecs")}</span>}
                       </div>
                       {!selectedFlavorSupportsPricingMode ? (
                         <p className="mt-3 text-sm text-amber-700">
-                          This flavor does not expose {getPricingModeLabel(catalogPricingMode)} pricing in the cached Huawei catalog for {catalogRegion}.
+                          This flavor does not expose {getPricingModeLabel(catalogPricingMode, "ecs")} pricing in the cached Huawei catalog for {catalogRegion}.
                         </p>
                       ) : null}
                       {catalogPricingMode === "RI" ? (
@@ -2532,11 +3302,38 @@ export default function Home() {
                     </>
                   ) : (
                     <p className="mt-3 text-sm text-slate-500">Load the catalog and choose a flavor first.</p>
-                  )}
+                  )) : (selectedDisk ? (
+                    <>
+                      <p className="mt-3 text-2xl font-semibold text-slate-900">{getDiskTypeDisplayName(selectedDisk.resourceSpecCode)}</p>
+                      <p className="mt-1 text-sm text-slate-600">{selectedDisk.resourceSpecCode}</p>
+                      <p className="mt-3 text-sm font-semibold text-slate-900">
+                        {getPricingRateLabel(catalogPricingMode)}: {selectedDiskSupportsPricingMode ? selectedDiskPrice.toFixed(4) : "-"}
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <span className="pill">{getPricingModeLabel(catalogPricingMode, "evs")}</span>
+                        <span className="pill">Max single disk: {MAX_EVS_DISK_SIZE_GB} GB</span>
+                      </div>
+                      {!selectedDiskSupportsPricingMode ? (
+                        <p className="mt-3 text-sm text-amber-700">
+                          This EVS type does not expose {getPricingModeLabel(catalogPricingMode, "evs")} pricing in the EVS catalog for {catalogRegion}.
+                        </p>
+                      ) : null}
+                      <p className="mt-4 text-sm leading-6 text-slate-600">
+                        {selectedDisk.productSpecDesc || selectedDisk.productSpecSysDesc || "No description available"}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="mt-3 text-sm text-slate-500">Load the EVS catalog and choose a disk type first.</p>
+                  ))}
 
                   <div className="mt-5 flex flex-wrap gap-3">
-                    <button className="btn btn-primary" disabled={estimateLoading || loadingTemplates || !selectedFlavor || !selectedFlavorSupportsPricingMode} onClick={() => void estimatePrice()} type="button">
-                      {estimateLoading ? "Estimating..." : `Estimate ${getPricingModeLabel(catalogPricingMode)} price`}
+                    <button
+                      className="btn btn-primary"
+                      disabled={estimateLoading || loadingTemplates || (selectedService === "ecs" ? !selectedFlavor || !selectedFlavorSupportsPricingMode : !selectedDisk || !selectedDiskSupportsPricingMode)}
+                      onClick={() => void estimatePrice()}
+                      type="button"
+                    >
+                      {estimateLoading ? "Estimating..." : `Estimate ${getPricingModeLabel(catalogPricingMode, selectedService)} price`}
                     </button>
                     <button className="btn btn-secondary" disabled={!estimateBody} onClick={addEstimatedItem} type="button">
                       {editorTarget?.kind === "draft" ? "Save draft changes" : "Add product to draft"}
@@ -2567,81 +3364,155 @@ export default function Home() {
                 </div>
 
                 <div className="soft-panel lg:col-span-2">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="section-title">Bulk ECS matcher</p>
-                      <p className="mt-2 text-sm text-slate-600">
-                        Paste a list of ECS requirements. The calculator picks the cheapest flavor in <code>{catalogRegion}</code>
-                        that meets each minimum using {getPricingModeLabel(catalogPricingMode)} pricing.
+                  {selectedService === "ecs" ? (
+                    <>
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="section-title">Bulk ECS matcher</p>
+                          <p className="mt-2 text-sm text-slate-600">
+                            Paste a list of ECS requirements. The calculator picks the cheapest flavor in <code>{catalogRegion}</code>
+                            that meets each minimum using {getPricingModeLabel(catalogPricingMode, "ecs")} pricing.
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <span className="pill">Region: {catalogRegion}</span>
+                          <span className="pill">Billing: {getPricingModeLabel(catalogPricingMode, "ecs")}</span>
+                          <span className="pill">Cart: {selectedCartName || "Unset"}</span>
+                        </div>
+                      </div>
+
+                      <label className="label mt-4" htmlFor="bulk-ecs-input">
+                        ECS list
+                      </label>
+                      <textarea
+                        className="field h-40 font-mono text-sm"
+                        id="bulk-ecs-input"
+                        onChange={(event) => setBulkEcsInput(event.target.value)}
+                        spellCheck={false}
+                        value={bulkEcsInput}
+                      />
+
+                      <p className="mt-3 text-sm text-slate-500">
+                        Uses the current quantity and duration from this step, plus the EVS settings below, for every matched ECS.
                       </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <span className="pill">Region: {catalogRegion}</span>
-                      <span className="pill">Billing: {getPricingModeLabel(catalogPricingMode)}</span>
-                      <span className="pill">Cart: {selectedCartName || "Unset"}</span>
-                    </div>
-                  </div>
 
-                  <label className="label mt-4" htmlFor="bulk-ecs-input">
-                    ECS list
-                  </label>
-                  <textarea
-                    className="field h-40 font-mono text-sm"
-                    id="bulk-ecs-input"
-                    onChange={(event) => setBulkEcsInput(event.target.value)}
-                    spellCheck={false}
-                    value={bulkEcsInput}
-                  />
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                        <div>
+                          <label className="label" htmlFor="bulk-disk-type">
+                            EVS type
+                          </label>
+                          <select className="field" id="bulk-disk-type" onChange={(event) => setBulkDiskType(event.target.value)} value={bulkDiskType}>
+                            {bulkDiskTypeOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {getDiskTypeDisplayName(option)}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="label" htmlFor="bulk-disk-size">
+                            EVS size (GB)
+                          </label>
+                          <input className="field" id="bulk-disk-size" onChange={(event) => setBulkDiskSize(event.target.value)} value={bulkDiskSize} />
+                        </div>
+                      </div>
 
-                  <p className="mt-3 text-sm text-slate-500">
-                    Uses the current quantity and duration from this step, plus the EVS settings below, for every matched ECS.
-                  </p>
+                      <div className="mt-4 flex flex-wrap gap-3">
+                        <button className="btn btn-primary" disabled={bulkMatchLoading || loadingTemplates} onClick={() => void addBulkMatchesToDraft()} type="button">
+                          {bulkMatchLoading ? "Matching..." : "Add matched ECS list to draft"}
+                        </button>
+                        <button className="btn btn-secondary" disabled={bulkMatchLoading || loadingTemplates || !selectedCartKey.trim()} onClick={() => void appendBulkMatchesToSelectedCart()} type="button">
+                          {bulkMatchLoading ? "Matching..." : "Add matched ECS list to selected cart"}
+                        </button>
+                      </div>
 
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    <div>
-                      <label className="label" htmlFor="bulk-disk-type">
-                        EVS type
-                      </label>
-                      <select className="field" id="bulk-disk-type" onChange={(event) => setBulkDiskType(event.target.value)} value={bulkDiskType}>
-                        {bulkDiskTypeOptions.map((option) => (
-                          <option key={option} value={option}>
-                            {getDiskTypeDisplayName(option)}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="label" htmlFor="bulk-disk-size">
-                        EVS size (GB)
-                      </label>
-                      <input className="field" id="bulk-disk-size" onChange={(event) => setBulkDiskSize(event.target.value)} value={bulkDiskSize} />
-                    </div>
-                  </div>
-
-                  <div className="mt-4 flex flex-wrap gap-3">
-                    <button className="btn btn-primary" disabled={bulkMatchLoading || loadingTemplates} onClick={() => void addBulkMatchesToDraft()} type="button">
-                      {bulkMatchLoading ? "Matching..." : "Add matched ECS list to draft"}
-                    </button>
-                    <button className="btn btn-secondary" disabled={bulkMatchLoading || loadingTemplates || !selectedCartKey.trim()} onClick={() => void appendBulkMatchesToSelectedCart()} type="button">
-                      {bulkMatchLoading ? "Matching..." : "Add matched ECS list to selected cart"}
-                    </button>
-                  </div>
-
-                  {bulkMatchSummary ? (
-                    <div className="result-strip mt-4">
-                      <p className="font-semibold text-slate-900">{bulkMatchSummary}</p>
-                      {bulkMatchResults.length ? (
-                        <div className="mt-3 space-y-2">
-                          {bulkMatchResults.map((match, index) => (
-                            <div key={`${match.request.name}-${match.flavorCode}-${index}`} className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-700">
-                              <span>{match.request.name} - {match.flavorCode} ({match.matchedVcpus} vCPU / {match.matchedRamGb.toFixed(0)} GB)</span>
-                              <span className="pill">{match.totalAmount.toFixed(2)} {match.currency}</span>
+                      {bulkMatchSummary ? (
+                        <div className="result-strip mt-4">
+                          <p className="font-semibold text-slate-900">{bulkMatchSummary}</p>
+                          {bulkMatchResults.length ? (
+                            <div className="mt-3 space-y-2">
+                              {bulkMatchResults.map((match, index) => (
+                                <div key={`${match.request.name}-${match.flavorCode}-${index}`} className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-700">
+                                  <span>{match.request.name} - {match.flavorCode} ({match.matchedVcpus} vCPU / {match.matchedRamGb.toFixed(0)} GB)</span>
+                                  <span className="pill">{match.totalAmount.toFixed(2)} {match.currency}</span>
+                                </div>
+                              ))}
                             </div>
-                          ))}
+                          ) : null}
                         </div>
                       ) : null}
-                    </div>
-                  ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="section-title">Bulk EVS add</p>
+                          <p className="mt-2 text-sm text-slate-600">
+                            Paste a list of EVS requests. Each item needs a <code>size</code>, can optionally include <code>name</code>,
+                            and can optionally override the EVS type with <code>type</code>.
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <span className="pill">Region: {catalogRegion}</span>
+                          <span className="pill">Billing: {getPricingModeLabel(catalogPricingMode, "evs")}</span>
+                          <span className="pill">Cart: {selectedCartName || "Unset"}</span>
+                        </div>
+                      </div>
+
+                      <label className="label mt-4" htmlFor="bulk-evs-input">
+                        EVS list
+                      </label>
+                      <textarea
+                        className="field h-40 font-mono text-sm"
+                        id="bulk-evs-input"
+                        onChange={(event) => setBulkEvsInput(event.target.value)}
+                        spellCheck={false}
+                        value={bulkEvsInput}
+                      />
+
+                      <p className="mt-3 text-sm text-slate-500">
+                        Uses the current quantity, duration, and description from this step. Each oversized disk is split automatically.
+                      </p>
+
+                      <div className="mt-4">
+                        <label className="label" htmlFor="bulk-disk-type">
+                          Default EVS type
+                        </label>
+                        <select className="field" id="bulk-disk-type" onChange={(event) => setBulkDiskType(event.target.value)} value={bulkDiskType}>
+                          {bulkDiskTypeOptions.map((option) => (
+                            <option key={option} value={option}>
+                              {getDiskTypeDisplayName(option)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="mt-4 flex flex-wrap gap-3">
+                        <button className="btn btn-primary" disabled={bulkEvsLoading || loadingTemplates} onClick={() => void addBulkEvsToDraft()} type="button">
+                          {bulkEvsLoading ? "Adding..." : "Add EVS list to draft"}
+                        </button>
+                        <button className="btn btn-secondary" disabled={bulkEvsLoading || loadingTemplates || !selectedCartKey.trim()} onClick={() => void appendBulkEvsToSelectedCart()} type="button">
+                          {bulkEvsLoading ? "Adding..." : "Add EVS list to selected cart"}
+                        </button>
+                      </div>
+
+                      {bulkEvsSummary ? (
+                        <div className="result-strip mt-4">
+                          <p className="font-semibold text-slate-900">{bulkEvsSummary}</p>
+                          {bulkEvsResults.length ? (
+                            <div className="mt-3 space-y-2">
+                              {bulkEvsResults.map((match, index) => (
+                                <div key={`${match.request.name ?? "evs"}-${match.diskType}-${index}`} className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-700">
+                                  <span>{match.request.name?.trim() || "Unnamed EVS"} - {getDiskTypeDisplayName(match.diskType)} ({match.diskSizes.join(" + ")} GB)</span>
+                                  <span className="pill">{match.totalAmount.toFixed(2)} {match.currency}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </>
+                  )}
                 </div>
               </div>
             </div>

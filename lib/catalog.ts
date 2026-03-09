@@ -603,6 +603,48 @@ export function buildCatalogPriceEstimate(
   };
 }
 
+export function buildCatalogDiskPriceEstimate(
+  body: unknown,
+  config: {
+    diskType: string;
+    diskSize: number;
+    durationValue: number;
+    quantity: number;
+    pricingMode: Exclude<CatalogPricingMode, "RI">;
+  },
+): PriceResponseBody | null {
+  const disk = getCatalogDisks(body).find((item) => item.resourceSpecCode === config.diskType);
+  if (!disk) {
+    return null;
+  }
+
+  const diskRate = getDiskBasePrice(disk, config.pricingMode);
+  if (!Number.isFinite(diskRate)) {
+    return null;
+  }
+
+  const quantity = Math.max(1, config.quantity);
+  const durationValue = Math.max(1, config.durationValue);
+  const diskSize = Math.max(0, config.diskSize);
+  const diskAmount = roundMoney(diskRate * diskSize * quantity * durationValue);
+
+  return {
+    amount: diskAmount,
+    discountAmount: 0,
+    originalAmount: diskAmount,
+    currency: "USD",
+    productRatingResult: [
+      {
+        id: disk.inquiryResult?.id ?? `cached-disk-${disk.productId ?? disk.resourceSpecCode}`,
+        productId: disk.productId ?? disk.inquiryResult?.productId,
+        amount: diskAmount,
+        discountAmount: 0,
+        originalAmount: diskAmount,
+      },
+    ],
+  };
+}
+
 export function isCatalogFlavorVisible(
   flavor: ProductFlavor,
   visibilityConfig?: EcsCalculatorVisibilityConfig | null,
