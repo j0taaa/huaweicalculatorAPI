@@ -1074,10 +1074,26 @@ function buildEvsCalculatorItemPayload(
   const durationUnit = getPricingDurationUnit(config.pricingMode);
   const diskTypeApiCode = normalizeDiskTypeApiCode(config.diskType);
   const payloadLabels = buildEvsPayloadLabels({
-    productType: typeof (diskInfo as { productType?: unknown }).productType === "string" ? (diskInfo as { productType: string }).productType : null,
-    resourceMeasureName: typeof (diskInfo as { resourceMeasureName?: unknown }).resourceMeasureName === "string" ? (diskInfo as { resourceMeasureName: string }).resourceMeasureName : null,
-    resourceMeasurePluralName: typeof (diskInfo as { resourceMeasurePluralName?: unknown }).resourceMeasurePluralName === "string" ? (diskInfo as { resourceMeasurePluralName: string }).resourceMeasurePluralName : null,
-    addToListTitle: typeof (diskInfo as { addToList_title?: unknown }).addToList_title === "string" ? (diskInfo as { addToList_title: string }).addToList_title : null,
+    productType: typeof disk.productType === "string"
+      ? disk.productType
+      : typeof (diskInfo as { productType?: unknown }).productType === "string"
+        ? (diskInfo as { productType: string }).productType
+        : null,
+    resourceMeasureName: typeof disk.resourceMeasureName === "string"
+      ? disk.resourceMeasureName
+      : typeof (diskInfo as { resourceMeasureName?: unknown }).resourceMeasureName === "string"
+        ? (diskInfo as { resourceMeasureName: string }).resourceMeasureName
+        : null,
+    resourceMeasurePluralName: typeof disk.resourceMeasurePluralName === "string"
+      ? disk.resourceMeasurePluralName
+      : typeof (diskInfo as { resourceMeasurePluralName?: unknown }).resourceMeasurePluralName === "string"
+        ? (diskInfo as { resourceMeasurePluralName: string }).resourceMeasurePluralName
+        : null,
+    addToListTitle: typeof disk.addToList_title === "string"
+      ? disk.addToList_title
+      : typeof (diskInfo as { addToList_title?: unknown }).addToList_title === "string"
+        ? (diskInfo as { addToList_title: string }).addToList_title
+        : null,
     quantityMeasureName: typeof (selectedProduct.purchaseNum as { measureNameBeforeTrans?: unknown } | undefined)?.measureNameBeforeTrans === "string"
       ? (selectedProduct.purchaseNum as { measureNameBeforeTrans: string }).measureNameBeforeTrans
       : null,
@@ -1085,7 +1101,26 @@ function buildEvsCalculatorItemPayload(
       ? (selectedProduct.purchaseNum as { measurePluralNameBeforeTrans: string }).measurePluralNameBeforeTrans
       : null,
   });
-  const diskPayloadFields = buildEvsDiskPayloadFields(diskTypeApiCode, config.diskSize, payloadLabels);
+  const diskPayloadFields = buildEvsDiskPayloadFields({
+    diskType: diskTypeApiCode,
+    diskSize: config.diskSize,
+    labels: payloadLabels,
+    resourceSpecType: typeof disk.resourceSpecType === "string"
+      ? disk.resourceSpecType
+      : typeof (diskInfo as { resourceSpecType?: unknown }).resourceSpecType === "string"
+        ? (diskInfo as { resourceSpecType: string }).resourceSpecType
+        : null,
+    volumeType: typeof disk.volumeType === "string"
+      ? disk.volumeType
+      : typeof (diskInfo as { volumeType?: unknown }).volumeType === "string"
+        ? (diskInfo as { volumeType: string }).volumeType
+        : null,
+    productSpecSysDesc: typeof disk.productSpecSysDesc === "string"
+      ? disk.productSpecSysDesc
+      : typeof (diskInfo as { productSpecSysDesc?: unknown }).productSpecSysDesc === "string"
+        ? (diskInfo as { productSpecSysDesc: string }).productSpecSysDesc
+        : null,
+  });
 
   payload.buyUrl = buildEvsBuyUrl({
     region: config.region,

@@ -20,22 +20,45 @@ describe("evs payload helpers", () => {
   });
 
   test("buildEvsDiskPayloadFields keeps API fields canonical and display fields friendly", () => {
-    const fields = buildEvsDiskPayloadFields(
-      "General Purpose SSD V2",
-      80,
-      buildEvsPayloadLabels(),
-    );
+    const fields = buildEvsDiskPayloadFields({
+      diskType: "General Purpose SSD V2",
+      diskSize: 80,
+      labels: buildEvsPayloadLabels(),
+      resourceSpecType: "General_Purpose_SSD_V2",
+      volumeType: "General Purpose SSD V2 for storage",
+      productSpecSysDesc: "Disk Specifications:General Purpose SSD V2 for storage",
+    });
 
     expect(fields).toMatchObject({
       resourceSpecCode: "GPSSD2.storage",
-      resourceSpecType: "GPSSD2.storage",
-      volumeType: "General Purpose SSD V2",
-      productSpecSysDesc: "Disk Specifications:General Purpose SSD V2",
+      resourceSpecType: "General_Purpose_SSD_V2",
+      volumeType: "General Purpose SSD V2 for storage",
+      productSpecSysDesc: "Disk Specifications:General Purpose SSD V2 for storage",
       productType: "calc_7_",
       resourceMeasureName: "detail_42_",
       resourceMeasurePluralName: "detail_42_",
       addToList_title: "calc_4_",
       addToList_product: "calc_7_ | 80detail_42_",
+    });
+  });
+
+  test("buildEvsDiskPayloadFields preserves a catalog resourceSpecType that differs from the API code", () => {
+    const fields = buildEvsDiskPayloadFields({
+      diskType: "SAS",
+      diskSize: 40,
+      labels: buildEvsPayloadLabels({ productType: "calc_2_" }),
+      resourceSpecType: "High_IO",
+      volumeType: "High I/O",
+      productSpecSysDesc: "Disk Specifications:High I/O",
+    });
+
+    expect(fields).toMatchObject({
+      resourceSpecCode: "SAS",
+      resourceSpecType: "High_IO",
+      volumeType: "High I/O",
+      productSpecSysDesc: "Disk Specifications:High I/O",
+      productType: "calc_2_",
+      addToList_product: "calc_2_ | 40detail_42_",
     });
   });
 });
