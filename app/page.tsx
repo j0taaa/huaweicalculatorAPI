@@ -17,6 +17,11 @@ import {
   type ProductDisk,
   type ProductFlavor,
 } from "@/lib/catalog";
+import {
+  DISK_TYPE_OPTIONS,
+  getDiskTypeDisplayName,
+  normalizeDiskTypeApiCode,
+} from "@/lib/disk-types";
 
 type Template = {
   id: string;
@@ -314,17 +319,6 @@ const PRICING_MODE_OPTIONS: Array<{ value: CatalogPricingMode; label: string }> 
   { value: "YEARLY", label: "Yearly" },
   { value: "RI", label: "RI (1 year)" },
 ];
-const DISK_TYPE_OPTIONS = [
-  { apiCode: "SATA", label: "Common I/O" },
-  { apiCode: "SAS", label: "High I/O" },
-  { apiCode: "SSD", label: "Ultra-high I/O" },
-  { apiCode: "ESSD", label: "Extreme SSD" },
-  { apiCode: "GPSSD", label: "General Purpose SSD" },
-  { apiCode: "GPSSD2.storage", label: "General Purpose SSD V2" },
-] as const;
-const DISK_TYPE_LABELS: Record<string, string> = Object.fromEntries(
-  DISK_TYPE_OPTIONS.map((option) => [option.apiCode, option.label]),
-);
 const SERVICE_OPTIONS: Array<{ value: CalculatorService; label: string; description: string }> = [
   { value: "ecs", label: "ECS", description: "Elastic Cloud Server" },
   { value: "evs", label: "EVS", description: "Elastic Volume Service" },
@@ -679,7 +673,7 @@ function parseBulkEvsRequests(input: string): BulkEvsRequest[] {
     const candidate = entry as Record<string, unknown>;
     const name = typeof candidate.name === "string" ? candidate.name.trim() : "";
     const size = typeof candidate.size === "number" ? candidate.size : Number(candidate.size);
-    const type = typeof candidate.type === "string" ? candidate.type.trim() : "";
+    const type = typeof candidate.type === "string" ? normalizeDiskTypeApiCode(candidate.type) : "";
 
     if (!Number.isFinite(size) || size <= 0) {
       throw new Error(`EVS item ${index + 1} must include a positive size value`);
@@ -716,11 +710,6 @@ function getFlavorSpec(flavor: ProductFlavor): string {
   }
 
   return flavor.resourceSpecCode.replace(/\.linux$/, "");
-}
-
-function getDiskTypeDisplayName(diskType: string): string {
-  const trimmed = diskType.trim();
-  return DISK_TYPE_LABELS[trimmed] ?? trimmed;
 }
 
 function formatDiskLabel(diskType: string, diskSize: number): string {
@@ -770,8 +759,8 @@ function getRemoteCartItems(detail: ShareCartDetail | null): RemoteCartItem[] {
     const storedDiskPricingMode = selectedProduct.calculatorDiskPricingMode?.trim() ?? "";
     const resourceCode = service === "ecs"
       ? (typeof vmInfo.resourceSpecCode === "string" ? vmInfo.resourceSpecCode : "Unknown flavor")
-      : (typeof diskInfo.resourceSpecCode === "string" ? diskInfo.resourceSpecCode : "Unknown disk");
-    const diskType = typeof diskInfo.resourceSpecCode === "string" ? diskInfo.resourceSpecCode : "Disk";
+      : normalizeDiskTypeApiCode(typeof diskInfo.resourceSpecCode === "string" ? diskInfo.resourceSpecCode : "Unknown disk");
+    const diskType = normalizeDiskTypeApiCode(typeof diskInfo.resourceSpecCode === "string" ? diskInfo.resourceSpecCode : "Disk");
     const diskSize = typeof diskInfo.resourceSize === "number" ? diskInfo.resourceSize : 0;
     const title = selectedProduct._customTitle?.trim()
       || selectedProduct.description?.trim()
@@ -1696,6 +1685,7 @@ export default function Home() {
 
     try {
       const nextRegion = region.trim() || DEFAULT_REGION;
+      const normalizedPreferredResourceCode = preferredResourceCode ? normalizeDiskTypeApiCode(preferredResourceCode) : "";
       setCatalogRegion(nextRegion);
       const result = service === "ecs"
         ? await fetchCatalogFromCache(nextRegion)
@@ -1720,8 +1710,8 @@ export default function Home() {
       const nextDisks = getCatalogDisks(result.response.body).filter((disk) => (
         DISK_TYPE_OPTIONS.some((option) => option.apiCode === disk.resourceSpecCode)
       ));
-      const preferred = preferredResourceCode
-        ? nextDisks.find((disk) => disk.resourceSpecCode === preferredResourceCode)
+      const preferred = normalizedPreferredResourceCode
+        ? nextDisks.find((disk) => disk.resourceSpecCode === normalizedPreferredResourceCode)
         : nextDisks.find((disk) => disk.resourceSpecCode === configDiskType) ?? nextDisks[0];
 
       if (preferred) {
@@ -1759,7 +1749,7 @@ export default function Home() {
 
     const quantity = Number.parseInt(configQuantity, 10) || 1;
     const durationValue = getNormalizedDurationValue(catalogPricingMode, configHours);
-    const diskType = bulkDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE;
+    const diskType = normalizeDiskTypeApiCode(bulkDiskType) || DEFAULT_CATALOG_DISK_TYPE;
     const diskSize = Number.parseInt(bulkDiskSize, 10) || Number.parseInt(DEFAULT_CATALOG_DISK_SIZE, 10);
     const descriptionBase = configDescription.trim() || "Generated from the custom calculator";
     const matchedItems = requests.map((request) => {
@@ -1912,14 +1902,14 @@ export default function Home() {
 
     const quantity = Number.parseInt(configQuantity, 10) || 1;
     const durationValue = getNormalizedDurationValue(catalogPricingMode, configHours);
-    const defaultType = bulkDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE;
+    const defaultType = normalizeDiskTypeApiCode(bulkDiskType) || DEFAULT_CATALOG_DISK_TYPE;
     const descriptionBase = configDescription.trim() || DEFAULT_EVS_DESCRIPTION;
     const diskMap = new Map(getCatalogDisks(pricingCatalog.response.body).map((disk) => [disk.resourceSpecCode, disk]));
     const items: CalculatorItem[] = [];
     const matches: BulkEvsMatch[] = [];
 
     for (const request of requests) {
-      const diskType = request.type?.trim() || defaultType;
+      const diskType = normalizeDiskTypeApiCode(request.type ?? "") || defaultType;
       const disk = diskMap.get(diskType);
       if (!disk) {
         throw new Error(`Disk type ${diskType} is unavailable in ${nextRegion}`);
@@ -2045,7 +2035,7 @@ export default function Home() {
     setCatalogPricingMode(item.pricingMode);
     setConfigQuantity(String(item.quantity));
     setConfigHours(String(item.hours));
-    setConfigDiskType(item.diskType);
+    setConfigDiskType(normalizeDiskTypeApiCode(item.diskType));
     setConfigDiskSize(String(item.diskSize));
     setConfigTitle(item.title);
     setConfigDescription(item.description);
@@ -2055,7 +2045,7 @@ export default function Home() {
       void loadCatalogForRegion(item.region, item.resourceCode, "ecs");
       return;
     }
-    void loadCatalogForRegion(item.region, item.diskType, "evs");
+    void loadCatalogForRegion(item.region, normalizeDiskTypeApiCode(item.diskType), "evs");
   }
 
   function populateEditorFromRemoteItem(item: RemoteCartItem) {
@@ -2064,7 +2054,7 @@ export default function Home() {
     setCatalogPricingMode(item.pricingMode);
     setConfigQuantity(String(item.quantity));
     setConfigHours(String(item.hours));
-    setConfigDiskType(item.diskType);
+    setConfigDiskType(normalizeDiskTypeApiCode(item.diskType));
     setConfigDiskSize(String(item.diskSize));
     setConfigTitle(item.title);
     setConfigDescription(item.description);
@@ -2074,7 +2064,7 @@ export default function Home() {
       void loadCatalogForRegion(item.region, item.resourceCode, "ecs");
       return;
     }
-    void loadCatalogForRegion(item.region, item.diskType, "evs");
+    void loadCatalogForRegion(item.region, normalizeDiskTypeApiCode(item.diskType), "evs");
   }
 
   function cancelEditor() {
@@ -2152,7 +2142,7 @@ export default function Home() {
 
         estimate = buildCatalogPriceEstimate(pricingCatalog.response.body, {
           flavorCode: selectedFlavor.resourceSpecCode,
-          diskType: configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
+          diskType: normalizeDiskTypeApiCode(configDiskType) || DEFAULT_CATALOG_DISK_TYPE,
           diskSize,
           durationValue,
           quantity,
@@ -2166,7 +2156,7 @@ export default function Home() {
           estimate,
           nextRegion,
           selectedFlavor.resourceSpecCode,
-          configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
+          normalizeDiskTypeApiCode(configDiskType) || DEFAULT_CATALOG_DISK_TYPE,
           diskSize,
           durationValue,
           quantity,
@@ -2182,7 +2172,7 @@ export default function Home() {
 
         const chunkSizes = splitDiskSize(diskSize);
         const chunkEstimates = chunkSizes.map((chunkSize) => buildCatalogDiskPriceEstimate(pricingCatalog.response.body, {
-          diskType: configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
+          diskType: normalizeDiskTypeApiCode(configDiskType) || DEFAULT_CATALOG_DISK_TYPE,
           diskSize: chunkSize,
           durationValue,
           quantity,
@@ -2212,7 +2202,7 @@ export default function Home() {
             headers: {},
             bodyRaw: JSON.stringify({
               region: nextRegion,
-              diskType: configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
+              diskType: normalizeDiskTypeApiCode(configDiskType) || DEFAULT_CATALOG_DISK_TYPE,
               diskSize,
               durationValue,
               quantity,
@@ -2274,7 +2264,7 @@ export default function Home() {
         quantity,
         durationValue,
         pricingMode: catalogPricingMode,
-        diskType: configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
+        diskType: normalizeDiskTypeApiCode(configDiskType) || DEFAULT_CATALOG_DISK_TYPE,
         diskSize,
         title: configTitle.trim() || selectedFlavor.resourceSpecCode,
         description: configDescription.trim() || "Generated from the custom calculator",
@@ -2299,7 +2289,7 @@ export default function Home() {
     const chunkSizes = splitDiskSize(diskSize);
     const items = chunkSizes.map((chunkSize, index) => {
       const chunkEstimate = buildCatalogDiskPriceEstimate(catalogResult?.response.body, {
-        diskType: configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
+        diskType: normalizeDiskTypeApiCode(configDiskType) || DEFAULT_CATALOG_DISK_TYPE,
         diskSize: chunkSize,
         durationValue,
         quantity,
@@ -2315,7 +2305,7 @@ export default function Home() {
         quantity,
         durationValue,
         pricingMode: catalogPricingMode as Exclude<CatalogPricingMode, "RI">,
-        diskType: configDiskType.trim() || DEFAULT_CATALOG_DISK_TYPE,
+        diskType: normalizeDiskTypeApiCode(configDiskType) || DEFAULT_CATALOG_DISK_TYPE,
         diskSize: chunkSize,
         title: buildSplitDiskTitle(configTitle.trim() || DEFAULT_EVS_TITLE, index, chunkSizes.length),
         description: configDescription.trim() || DEFAULT_EVS_DESCRIPTION,
@@ -2562,7 +2552,7 @@ export default function Home() {
           quantity,
           durationValue,
           pricingMode: catalogPricingMode,
-          diskType: configDiskType.trim() || editingRemoteItem.diskType,
+          diskType: normalizeDiskTypeApiCode(configDiskType) || normalizeDiskTypeApiCode(editingRemoteItem.diskType),
           diskSize,
           title: configTitle.trim() || selectedFlavor.resourceSpecCode,
           description: configDescription.trim() || editingRemoteItem.description,
@@ -2577,7 +2567,7 @@ export default function Home() {
       const chunkSizes = splitDiskSize(diskSize);
       replacementItems = chunkSizes.map((chunkSize, index) => {
         const chunkEstimate = buildCatalogDiskPriceEstimate(catalogResult?.response.body, {
-          diskType: configDiskType.trim() || editingRemoteItem.diskType,
+          diskType: normalizeDiskTypeApiCode(configDiskType) || normalizeDiskTypeApiCode(editingRemoteItem.diskType),
           diskSize: chunkSize,
           durationValue,
           quantity,
@@ -2592,7 +2582,7 @@ export default function Home() {
           quantity,
           durationValue,
           pricingMode: catalogPricingMode as Exclude<CatalogPricingMode, "RI">,
-          diskType: configDiskType.trim() || editingRemoteItem.diskType,
+          diskType: normalizeDiskTypeApiCode(configDiskType) || normalizeDiskTypeApiCode(editingRemoteItem.diskType),
           diskSize: chunkSize,
           title: buildSplitDiskTitle(configTitle.trim() || DEFAULT_EVS_TITLE, index, chunkSizes.length),
           description: configDescription.trim() || editingRemoteItem.description,
