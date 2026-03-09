@@ -22,6 +22,11 @@ import {
   getDiskTypeDisplayName,
   normalizeDiskTypeApiCode,
 } from "@/lib/disk-types";
+import {
+  buildEvsBuyUrl,
+  buildEvsDiskPayloadFields,
+  buildEvsPayloadLabels,
+} from "@/lib/evs-payload";
 
 type Template = {
   id: string;
@@ -886,12 +891,6 @@ function buildEcsBuyUrl(
   return url.toString();
 }
 
-function buildEvsBuyUrl(region: string): string {
-  const url = new URL("https://console-intl.huaweicloud.com/evs/");
-  url.searchParams.set("region", region);
-  return `${url.toString()}#/evs/createVolume`;
-}
-
 function buildEcsCalculatorItemPayload(
   sampleItem: CalculatorCartItemPayload,
   flavor: ProductFlavor,
@@ -1073,10 +1072,33 @@ function buildEvsCalculatorItemPayload(
   const diskInfo = existingInfos.find((info) => typeof info?.resourceType === "string" && info.resourceType.includes(".volume")) ?? existingInfos[2] ?? existingInfos[0] ?? {};
   const diskRating = priceResponse.productRatingResult?.[0];
   const durationUnit = getPricingDurationUnit(config.pricingMode);
+  const diskTypeApiCode = normalizeDiskTypeApiCode(config.diskType);
+  const payloadLabels = buildEvsPayloadLabels({
+    productType: typeof (diskInfo as { productType?: unknown }).productType === "string" ? (diskInfo as { productType: string }).productType : null,
+    resourceMeasureName: typeof (diskInfo as { resourceMeasureName?: unknown }).resourceMeasureName === "string" ? (diskInfo as { resourceMeasureName: string }).resourceMeasureName : null,
+    resourceMeasurePluralName: typeof (diskInfo as { resourceMeasurePluralName?: unknown }).resourceMeasurePluralName === "string" ? (diskInfo as { resourceMeasurePluralName: string }).resourceMeasurePluralName : null,
+    addToListTitle: typeof (diskInfo as { addToList_title?: unknown }).addToList_title === "string" ? (diskInfo as { addToList_title: string }).addToList_title : null,
+    quantityMeasureName: typeof (selectedProduct.purchaseNum as { measureNameBeforeTrans?: unknown } | undefined)?.measureNameBeforeTrans === "string"
+      ? (selectedProduct.purchaseNum as { measureNameBeforeTrans: string }).measureNameBeforeTrans
+      : null,
+    quantityMeasurePluralName: typeof (selectedProduct.purchaseNum as { measurePluralNameBeforeTrans?: unknown } | undefined)?.measurePluralNameBeforeTrans === "string"
+      ? (selectedProduct.purchaseNum as { measurePluralNameBeforeTrans: string }).measurePluralNameBeforeTrans
+      : null,
+  });
+  const diskPayloadFields = buildEvsDiskPayloadFields(diskTypeApiCode, config.diskSize, payloadLabels);
 
-  payload.buyUrl = buildEvsBuyUrl(config.region);
+  payload.buyUrl = buildEvsBuyUrl({
+    region: config.region,
+    pricingMode: config.pricingMode,
+    diskType: diskTypeApiCode,
+    diskSize: config.diskSize,
+    quantity: config.quantity,
+  });
 
   rewriteValue.global_DESCRIPTION = config.description;
+  rewriteValue.global_TITLE = {
+    tag: selectedProduct.tag ?? "general.online.portal",
+  };
   rewriteValue.global_PRICINGMODE = config.pricingMode;
   rewriteValue.global_DISKPRICINGMODE = config.pricingMode;
   rewriteValue.global_DURATIONUNIT = durationUnit;
@@ -1088,17 +1110,15 @@ function buildEvsCalculatorItemPayload(
 
   rewriteValue.template_RENDER = {
     calculator_product_stepper: {
+      productType: payloadLabels.productType,
       UNSET_Stepper_0: {
         measureId: 17,
         measureValue: config.diskSize,
-        measureNameBeforeTrans: "",
-        measurePluralNameBeforeTrans: "",
+        measureNameBeforeTrans: payloadLabels.resourceMeasureName,
+        measurePluralNameBeforeTrans: payloadLabels.resourceMeasurePluralName,
         transRate: "",
         transTarget: "",
       },
-    },
-    calculator_evs_tip: {
-      type: config.diskType,
     },
   };
 
@@ -1117,8 +1137,8 @@ function buildEvsCalculatorItemPayload(
     UNSET_Stepper_0: {
       measureId: 41,
       measureValue: config.quantity,
-      measureNameBeforeTrans: "calc_29_",
-      measurePluralNameBeforeTrans: "calc_30_",
+      measureNameBeforeTrans: payloadLabels.quantityMeasureName,
+      measurePluralNameBeforeTrans: payloadLabels.quantityMeasurePluralName,
       transRate: "",
       transTarget: "",
     },
@@ -1133,6 +1153,9 @@ function buildEvsCalculatorItemPayload(
   selectedProduct._customTitle = config.title;
   selectedProduct.chargeMode = config.pricingMode;
   selectedProduct.chargeModeName = config.pricingMode;
+  selectedProduct.periodType = 4;
+  selectedProduct.periodNum = 1;
+  selectedProduct.subscriptionNum = 1;
   selectedProduct.calculatorPricingMode = config.pricingMode;
   selectedProduct.calculatorDiskPricingMode = config.pricingMode;
   selectedProduct.calculatorDurationUnit = durationUnit;
@@ -1148,18 +1171,17 @@ function buildEvsCalculatorItemPayload(
   selectedProduct.purchaseNum = {
     measureValue: config.quantity,
     measureId: 41,
-    measureNameBeforeTrans: "calc_29_",
-    measurePluralNameBeforeTrans: "calc_30_",
+    measureNameBeforeTrans: payloadLabels.quantityMeasureName,
+    measurePluralNameBeforeTrans: payloadLabels.quantityMeasurePluralName,
   };
 
   selectedProduct.productAllInfos = [
     {
       ...(diskInfo as Record<string, unknown>),
       ...disk,
+      ...diskPayloadFields,
       resourceType: disk.resourceType ?? (diskInfo as Record<string, unknown>).resourceType ?? "hws.resource.type.volume",
       cloudServiceType: disk.cloudServiceType ?? (diskInfo as Record<string, unknown>).cloudServiceType ?? "hws.service.type.ebs",
-      resourceSpecCode: config.diskType,
-      resourceSpecType: disk.resourceSpecType ?? config.diskType,
       resourceSize: config.diskSize,
       productNum: config.quantity,
       selfProductNum: config.quantity,
