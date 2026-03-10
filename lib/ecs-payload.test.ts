@@ -334,7 +334,7 @@ test("buildEcsSystemDiskPayload annualizes RI system disks for Huawei combine bi
           measureUnitStep: 1,
           measureUnit: 4,
           usageFactor: "Duration",
-          usageMeasureId: 4,
+          usageMeasureId: 6,
           amount: 0.000112,
         },
       ],
@@ -355,6 +355,13 @@ test("buildEcsSystemDiskPayload annualizes RI system disks for Huawei combine bi
   expect(payload.inquiryTag).toBe("combine");
   expect(payload.usageValue).toBe(730);
   expect(payload.cpqPurchaseDuration).toBe(8760);
+  expect(payload.usageMeasureId).toBe(4);
+  expect(payload.bakPlanList).toEqual([
+    expect.objectContaining({
+      productId: "00301-135025-0--0",
+      usageMeasureId: 4,
+    }),
+  ]);
   expect((payload.inquiryResult as { amount?: number; perAmount?: number }).amount).toBe(39.2448);
   expect((payload.inquiryResult as { amount?: number; perAmount?: number }).perAmount).toBe(3.2704);
 });

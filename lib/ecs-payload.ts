@@ -13,6 +13,7 @@ const RI_MONTHLY_HOURS = 730;
 const RI_YEARLY_HOURS = 8760;
 const RI_INSTALLMENTS = 12;
 const RI_INSTALL_PERIOD_TYPE = 2;
+const HUAWEI_HOUR_USAGE_MEASURE_ID = 4;
 
 export function getEcsSystemDiskStepperType(disk: ProductDisk, existingDiskInfo: Record<string, unknown>): string {
   if (typeof disk.type === "string" && disk.type.trim()) {
@@ -364,6 +365,12 @@ export function buildEcsSystemDiskPayload(options: {
   }
 
   if (pricingMode === "RI") {
+    const normalizedRiPlan = selectedPlan
+      ? {
+          ...selectedPlan,
+          usageMeasureId: HUAWEI_HOUR_USAGE_MEASURE_ID,
+        }
+      : null;
     const diskMonthlyTotal = selectedPlan
       ? Number(((selectedPlan.amount ?? 0) * diskSize * quantity * RI_MONTHLY_HOURS).toFixed(5))
       : 0;
@@ -393,27 +400,27 @@ export function buildEcsSystemDiskPayload(options: {
       resourceSize: diskSize,
       addToList_product: replaceDiskAddToListProduct(existingDiskInfo.addToList_product, nextType, diskSize),
       planList: undefined,
-      bakPlanList: selectedPlan ? [selectedPlan] : existingDiskInfo.bakPlanList,
-      productId: selectedPlan?.productId ?? disk.productId ?? existingDiskInfo.productId,
+      bakPlanList: normalizedRiPlan ? [normalizedRiPlan] : existingDiskInfo.bakPlanList,
+      productId: normalizedRiPlan?.productId ?? disk.productId ?? existingDiskInfo.productId,
       productNum: quantity,
       selfProductNum: typeof existingDiskInfo.selfProductNum === "number" ? existingDiskInfo.selfProductNum : 1,
       billingMode: "ONDEMAND",
       inquiryTag: "combine",
-      siteCode: selectedPlan?.siteCode ?? disk.siteCode ?? existingDiskInfo.siteCode,
-      periodNum: selectedPlan?.periodNum ?? disk.periodNum ?? existingDiskInfo.periodNum ?? null,
-      billingEvent: selectedPlan?.billingEvent ?? disk.billingEvent ?? existingDiskInfo.billingEvent,
-      measureUnitStep: selectedPlan?.measureUnitStep ?? disk.measureUnitStep ?? existingDiskInfo.measureUnitStep,
-      measureUnit: selectedPlan?.measureUnit ?? disk.measureUnit ?? existingDiskInfo.measureUnit,
-      usageFactor: selectedPlan?.usageFactor ?? disk.usageFactor ?? existingDiskInfo.usageFactor,
-      usageMeasureId: selectedPlan?.usageMeasureId ?? disk.usageMeasureId ?? existingDiskInfo.usageMeasureId,
-      amount: selectedPlan?.amount ?? (typeof disk.amount === "number" ? disk.amount : existingDiskInfo.amount),
+      siteCode: normalizedRiPlan?.siteCode ?? disk.siteCode ?? existingDiskInfo.siteCode,
+      periodNum: normalizedRiPlan?.periodNum ?? disk.periodNum ?? existingDiskInfo.periodNum ?? null,
+      billingEvent: normalizedRiPlan?.billingEvent ?? disk.billingEvent ?? existingDiskInfo.billingEvent,
+      measureUnitStep: normalizedRiPlan?.measureUnitStep ?? disk.measureUnitStep ?? existingDiskInfo.measureUnitStep,
+      measureUnit: normalizedRiPlan?.measureUnit ?? disk.measureUnit ?? existingDiskInfo.measureUnit,
+      usageFactor: normalizedRiPlan?.usageFactor ?? disk.usageFactor ?? existingDiskInfo.usageFactor,
+      usageMeasureId: HUAWEI_HOUR_USAGE_MEASURE_ID,
+      amount: normalizedRiPlan?.amount ?? (typeof disk.amount === "number" ? disk.amount : existingDiskInfo.amount),
       usageValue: RI_MONTHLY_HOURS,
       cpqPurchaseDuration: RI_YEARLY_HOURS,
       __hydratedPricingModes: undefined,
       inquiryResult: {
         ...existingInquiry,
         id: diskRating?.id ?? existingInquiry.id,
-        productId: diskRating?.productId ?? selectedPlan?.productId ?? disk.productId ?? existingDiskInfo.productId,
+        productId: diskRating?.productId ?? normalizedRiPlan?.productId ?? disk.productId ?? existingDiskInfo.productId,
         amount: diskAnnualTotal,
         discountAmount: diskRating?.discountAmount ?? 0,
         originalAmount: diskRating?.originalAmount ?? diskAnnualTotal,
