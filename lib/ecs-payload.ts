@@ -70,12 +70,40 @@ export function buildEcsSystemDiskPayload(options: {
 }
 
 function getFlavorFamily(flavor: ProductFlavor): string {
-  if (typeof flavor.resourceSpecType === "string" && flavor.resourceSpecType.trim()) {
-    return flavor.resourceSpecType.trim();
+  const familySource = [
+    typeof flavor.spec === "string" ? flavor.spec : "",
+    typeof flavor.riResourceSepc === "string" ? flavor.riResourceSepc : "",
+    typeof flavor.resourceSpecCode === "string" ? flavor.resourceSpecCode : "",
+  ].find((value) => value.trim());
+  const match = familySource?.match(/^([^.]+)/);
+  return match?.[1]?.trim() ?? "";
+}
+
+function getFlavorDisplaySpec(flavor: ProductFlavor): string {
+  if (typeof flavor.spec === "string" && flavor.spec.trim()) {
+    return flavor.spec.trim();
   }
 
-  const match = flavor.resourceSpecCode.match(/^([^.]+)/);
-  return match?.[1]?.trim() ?? "";
+  return flavor.resourceSpecCode.replace(/\.(linux|byol)$/i, "");
+}
+
+export function buildEcsFlavorAddToListProduct(
+  flavor: ProductFlavor,
+  existingVmInfo: Record<string, unknown>,
+): string | undefined {
+  const parts = [
+    typeof flavor.arch === "string" && flavor.arch.trim() ? flavor.arch.trim() : null,
+    typeof flavor.vmType === "string" && flavor.vmType.trim() ? flavor.vmType.trim() : null,
+    getFlavorDisplaySpec(flavor),
+    typeof flavor.cpu === "string" && flavor.cpu.trim() ? flavor.cpu.trim() : null,
+    typeof flavor.mem === "string" && flavor.mem.trim() ? flavor.mem.trim() : null,
+  ].filter((value): value is string => Boolean(value && value.trim()));
+
+  if (parts.length) {
+    return parts.join(" | ");
+  }
+
+  return typeof existingVmInfo.addToList_product === "string" ? existingVmInfo.addToList_product : undefined;
 }
 
 export function buildEcsImagePayload(options: {
@@ -85,12 +113,11 @@ export function buildEcsImagePayload(options: {
 }): Record<string, unknown> {
   const { existingImageInfo, flavor, durationValue } = options;
   const family = getFlavorFamily(flavor);
-  const existingTypes = Array.isArray(existingImageInfo.type)
-    ? existingImageInfo.type.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
-    : [];
-  const nextTypes = family
-    ? [family, ...existingTypes.filter((entry) => entry !== family)]
-    : existingTypes;
+  const nextTypes = family ? [family] : (
+    Array.isArray(existingImageInfo.type)
+      ? existingImageInfo.type.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+      : []
+  );
 
   return {
     ...existingImageInfo,

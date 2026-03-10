@@ -32,6 +32,7 @@ import {
   normalizeDiskTypeApiCode,
 } from "@/lib/disk-types";
 import {
+  buildEcsFlavorAddToListProduct,
   buildEcsImagePayload,
   buildEcsSystemDiskPayload,
   getEcsSystemDiskStepperType,
@@ -1023,6 +1024,7 @@ function buildEcsCalculatorItemPayload(
     cloudServiceType: flavor.cloudServiceType ?? vmInfo.cloudServiceType,
     resourceSpecCode: flavor.resourceSpecCode,
     productSpecSysDesc: flavor.productSpecSysDesc ?? vmInfo.productSpecSysDesc,
+    addToList_product: buildEcsFlavorAddToListProduct(flavor, vmInfo),
     productNum: config.quantity,
     selfProductNum: config.quantity,
     billingMode: config.pricingMode,

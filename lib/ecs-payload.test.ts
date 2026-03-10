@@ -1,5 +1,10 @@
 import { expect, test } from "bun:test";
-import { buildEcsImagePayload, buildEcsSystemDiskPayload, getEcsSystemDiskStepperType } from "@/lib/ecs-payload";
+import {
+  buildEcsFlavorAddToListProduct,
+  buildEcsImagePayload,
+  buildEcsSystemDiskPayload,
+  getEcsSystemDiskStepperType,
+} from "@/lib/ecs-payload";
 
 test("getEcsSystemDiskStepperType prefers the catalog disk token", () => {
   expect(getEcsSystemDiskStepperType(
@@ -71,7 +76,7 @@ test("buildEcsSystemDiskPayload keeps disk pricing on-demand for RI ECS items", 
   expect(payload.billingMode).toBe("ONDEMAND");
 });
 
-test("buildEcsImagePayload promotes the target flavor family in the image compatibility list", () => {
+test("buildEcsImagePayload keeps only the target flavor family in the image compatibility list", () => {
   const payload = buildEcsImagePayload({
     existingImageInfo: {
       id: "old-image",
@@ -79,12 +84,30 @@ test("buildEcsImagePayload promotes the target flavor family in the image compat
     },
     flavor: {
       resourceSpecCode: "c6.2u.4g.linux",
-      resourceSpecType: "c6",
+      resourceSpecType: "c6_2",
     },
     durationValue: 744,
   });
 
-  expect(payload.type).toEqual(["c6", "x1", "c7"]);
+  expect(payload.type).toEqual(["c6"]);
   expect(payload.productNum).toBe(744);
   expect(payload.durationNum).toBe(744);
+});
+
+test("buildEcsFlavorAddToListProduct rewrites the display label with the target flavor spec", () => {
+  const label = buildEcsFlavorAddToListProduct(
+    {
+      resourceSpecCode: "c6.2u.4g.linux",
+      spec: "c6.2u.4g",
+      arch: "dataInfo_32_",
+      vmType: "dataInfo_3_",
+      cpu: "2dataInfo_36_",
+      mem: "4BSSUNIT.pluralUnit.102",
+    },
+    {
+      addToList_product: "dataInfo_32_ | dataInfo_1_ | x1.2u.4g | 2dataInfo_36_ | 4BSSUNIT.pluralUnit.102",
+    },
+  );
+
+  expect(label).toBe("dataInfo_32_ | dataInfo_3_ | c6.2u.4g | 2dataInfo_36_ | 4BSSUNIT.pluralUnit.102");
 });
