@@ -312,6 +312,14 @@ function getLowestPlanAmount(plans: CatalogPlan[]): number {
   return amounts.length ? Math.min(...amounts) : Number.POSITIVE_INFINITY;
 }
 
+function getHighestPlanAmount(plans: CatalogPlan[]): number {
+  const amounts = plans
+    .map((plan) => plan.amount)
+    .filter((amount): amount is number => typeof amount === "number" && Number.isFinite(amount));
+
+  return amounts.length ? Math.max(...amounts) : Number.POSITIVE_INFINITY;
+}
+
 function isRiPurchasePricePlan(plan: CatalogPlan): boolean {
   return plan.originType === "perPrice" || plan.amountType === "nodeData.perPrice";
 }
@@ -338,27 +346,33 @@ function getCatalogItemBasePrice(item: CatalogPricedItem, pricingMode: CatalogPr
   ));
 
   if (pricingMode === "RI") {
-    const oneYearRiPlans = matchingPlans.filter((plan) => plan.periodNum === 1);
+    const nativeRiPlans = getNativeCatalogPlans(item).filter((plan) => (
+      plan.billingMode === "RI" && typeof plan.amount === "number"
+    ));
+    const oneYearRiPlans = nativeRiPlans.filter((plan) => plan.periodNum === 1);
     const oneYearRiPrice = getPreferredRiPrice(oneYearRiPlans);
     if (Number.isFinite(oneYearRiPrice)) {
       return oneYearRiPrice;
     }
 
-    // Some Huawei catalog snapshots omit `periodNum` on native RI plans but still
-    // return separate 1-year and 3-year purchase totals. In that case, the
-    // lower RI purchase total corresponds to the 1-year reservation.
-    const nativeUntypedRiPurchasePlans = getNativeCatalogPlans(item).filter((plan) => (
-      plan.billingMode === "RI"
-      && typeof plan.amount === "number"
-      && Number.isFinite(plan.amount)
-      && (plan.periodNum === undefined || plan.periodNum === null)
+    // Some Huawei catalog snapshots omit `periodNum` on native RI plans while
+    // still returning separate 1-year and 3-year purchase totals. Huawei's
+    // official calculator treats the higher native purchase total as the 1-year
+    // price and the lower one as the longer-term discounted option.
+    const nativeUntypedRiPurchasePlans = nativeRiPlans.filter((plan) => (
+      (plan.periodNum === undefined || plan.periodNum === null)
       && isRiPurchasePricePlan(plan)
     ));
     if (nativeUntypedRiPurchasePlans.length >= 2) {
-      const inferredOneYearRiPrice = getLowestPlanAmount(nativeUntypedRiPurchasePlans);
+      const inferredOneYearRiPrice = getHighestPlanAmount(nativeUntypedRiPurchasePlans);
       if (Number.isFinite(inferredOneYearRiPrice)) {
         return inferredOneYearRiPrice;
       }
+    }
+
+    const singleNativeRiPurchasePrice = getPreferredRiPrice(nativeUntypedRiPurchasePlans);
+    if (Number.isFinite(singleNativeRiPurchasePrice)) {
+      return singleNativeRiPurchasePrice;
     }
   } else {
     const matchedPrice = getLowestPlanAmount(matchingPlans);

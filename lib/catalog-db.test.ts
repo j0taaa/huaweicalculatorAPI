@@ -80,7 +80,7 @@ describe("catalog DB hydration", () => {
     expect(getDiskBasePrice(disk, "ONDEMAND")).toBe(0.000247);
   });
 
-  test("hydrateCatalogEntryPrices marks synthesized RI plans as 1-year", () => {
+  test("hydrateCatalogEntryPrices marks synthesized RI plans as 1-year without using them for RI pricing", () => {
     const entry = makeEntry(
       makeFlavor("x1.2u.4g.linux", {}),
       makeDisk("GPSSD", {}),
@@ -95,6 +95,6 @@ describe("catalog DB hydration", () => {
 
     expect(riPlan?.periodNum).toBe(1);
     expect(riPlan?.amount).toBe(45.04);
-    expect(getFlavorBasePrice(flavor, "RI")).toBe(45.04);
+    expect(getFlavorBasePrice(flavor, "RI")).toBe(Number.POSITIVE_INFINITY);
   });
 });

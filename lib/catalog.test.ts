@@ -205,6 +205,7 @@ describe("catalog helpers", () => {
         { billingMode: "RI", originType: "perPrice", amount: 40.04 },
         { billingMode: "RI", originType: "price", amount: 0 },
         { billingMode: "RI", originType: "perPrice", amount: 45.04 },
+        { billingMode: "RI", originType: "perPrice", periodNum: 1, amount: 30, source: "price_api" },
       ],
     }), "RI")).toBe(true);
   });
@@ -302,17 +303,18 @@ describe("catalog helpers", () => {
     expect(getFlavorBasePrice(effectiveOnly, "RI")).toBe(Number.POSITIVE_INFINITY);
   });
 
-  test("getFlavorBasePrice falls back to the lowest native RI purchase total when periodNum is missing", () => {
+  test("getFlavorBasePrice falls back to the highest native RI purchase total when periodNum is missing", () => {
     const flavor = makeFlavor("x1.small", {
       planList: [
         { billingMode: "RI", originType: "price", amount: 0 },
         { billingMode: "RI", originType: "perPrice", amount: 40.04 },
         { billingMode: "RI", originType: "price", amount: 0 },
         { billingMode: "RI", originType: "perPrice", amount: 45.04 },
+        { billingMode: "RI", originType: "perPrice", periodNum: 1, amount: 30, source: "price_api" },
       ],
     });
 
-    expect(getFlavorBasePrice(flavor, "RI")).toBe(40.04);
+    expect(getFlavorBasePrice(flavor, "RI")).toBe(45.04);
   });
 
   test("getEffectiveDiskPricingMode falls back to ONDEMAND for RI", () => {
