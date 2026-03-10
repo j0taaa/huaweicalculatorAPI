@@ -20,7 +20,6 @@ import {
 } from "@/lib/catalog";
 import {
   BRAZIL_REGION,
-  buildDuplicateCartName,
   getDefaultBillingConversionTarget,
   getDefaultRegionConversionTarget,
   getDominantCartRegion,
@@ -141,6 +140,16 @@ type CatalogRegionListResult = {
   cache?: CatalogCacheMeta;
   regions?: CatalogRegion[];
   regionErrors?: Record<string, string>;
+  error?: string;
+};
+
+type CartConversionResult = {
+  nextKey: string;
+  sourceName: string;
+  duplicateName: string;
+  authExpired?: boolean;
+  authCode?: string;
+  authMessage?: string;
   error?: string;
 };
 
@@ -1605,6 +1614,35 @@ export default function Home() {
     return data;
   }
 
+  async function runCartConversion(conversion: {
+    kind: "billing";
+    targetPricingMode: "ONDEMAND" | "RI";
+  } | {
+    kind: "region";
+    targetRegion: string;
+  }): Promise<CartConversionResult> {
+    const response = await fetch("/api/cart-convert", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        key: selectedCartKey.trim(),
+        cookie: normalizedCookie || undefined,
+        csrf: csrf.trim() || undefined,
+        conversion,
+      }),
+    });
+
+    const data = (await response.json()) as CartConversionResult;
+    if (!response.ok) {
+      if (response.status === 401 && data.authExpired) {
+        throw new Error(data.error ?? "Huawei session expired. Open Session and paste a fresh cookie or HWS_INTL_ID.");
+      }
+      throw new Error(data.error ?? `Cart conversion failed with status ${response.status}`);
+    }
+
+    return data;
+  }
+
   async function fetchCatalogFromCache(region: string): Promise<CatalogCacheResult> {
     const response = await fetch(`/api/catalog?region=${encodeURIComponent(region)}`, {
       cache: "no-store",
@@ -2218,238 +2256,6 @@ export default function Home() {
     return result;
   }
 
-  async function cloneCartToNewKey(detail: ShareCartDetail, nextName: string): Promise<string> {
-    const nextKey = await createLiveCartWithName(nextName);
-    const duplicatePayload: EditCartPayload = {
-      billingMode: detail.billingMode || "cart.shareList.billingModeTotal",
-      cartListData: (detail.cartListData ?? []).map((item) => cloneJson(item as CalculatorCartItemPayload)),
-      name: nextName,
-      totalPrice: buildCartTotalPrice((detail.cartListData ?? []).map((item) => cloneJson(item as CalculatorCartItemPayload))),
-    };
-
-    await submitCartUpdate(nextKey, duplicatePayload);
-    return nextKey;
-  }
-
-  async function buildBillingConversionItems(detail: ShareCartDetail, targetPricingMode: "ONDEMAND" | "RI") {
-    const editTemplate = findTemplate(templates, "edit-cart");
-    const samplePayload = (editTemplate?.bodyJson && typeof editTemplate.bodyJson === "object")
-      ? (editTemplate.bodyJson as EditCartPayload).cartListData?.[0]
-      : null;
-    if (!samplePayload) {
-      throw new Error("Edit cart template is missing a sample ECS item");
-    }
-
-    const items = getRemoteCartItems(detail);
-    const catalogPromises = new Map<string, Promise<CatalogCacheResult>>();
-    const getCatalog = async (region: string, service: CalculatorService) => {
-      const key = `${service}:${region}`;
-      const cachedPromise = catalogPromises.get(key);
-      if (cachedPromise) {
-        return cachedPromise;
-      }
-
-      const nextPromise = getCatalogForService(region, service);
-      catalogPromises.set(key, nextPromise);
-      return nextPromise;
-    };
-
-    await Promise.all(Array.from(new Set(items.map((item) => `${item.service}:${item.region}`))).map(async (key) => {
-      const [service, region] = key.split(":");
-      await getCatalog(region ?? DEFAULT_REGION, service === "evs" ? "evs" : "ecs");
-    }));
-
-    const convertedItems: ShareCartItemPayload[] = [];
-    for (const item of items) {
-      const description = resolveItemDescription(
-        item.description,
-        item.service === "ecs" ? item.resourceCode : DEFAULT_EVS_DESCRIPTION,
-      );
-
-      if (item.service === "ecs") {
-        const catalog = await getCatalog(item.region, "ecs");
-        const catalogBody = catalog.response.body;
-        const targetDiskType = normalizeDiskTypeApiCode(item.diskType) || DEFAULT_CATALOG_DISK_TYPE;
-        const durationValue = getNormalizedDurationValue(targetPricingMode, String(item.hours));
-        const targetDisk = getCatalogDisks(catalogBody).find((disk) => disk.resourceSpecCode === targetDiskType);
-        if (!targetDisk) {
-          throw new Error(`Disk type ${targetDiskType} is unavailable in ${item.region}`);
-        }
-
-        const targetFlavors = getCatalogFlavors(catalogBody);
-        const currentFlavor = targetFlavors.find((flavor) => (
-          flavor.resourceSpecCode === item.resourceCode
-          && hasCatalogPricingModeSupport(flavor, targetPricingMode)
-          && Number.isFinite(getFlavorBasePrice(flavor, targetPricingMode))
-        ));
-        const matchedFlavor = currentFlavor ?? selectCheapestFlavorForRequirements(targetFlavors, {
-          pricingMode: targetPricingMode,
-          minVcpus: item.vcpus,
-          minRamGb: item.ramGb,
-        });
-        if (!matchedFlavor) {
-          throw new Error(`No ${getPricingModeLabel(targetPricingMode)} ECS in ${item.region} matches ${item.vcpus} vCPU / ${item.ramGb.toFixed(0)} GB RAM`);
-        }
-
-        const estimate = buildCatalogPriceEstimate(catalogBody, {
-          flavorCode: matchedFlavor.resourceSpecCode,
-          diskType: targetDiskType,
-          diskSize: item.diskSize,
-          durationValue,
-          quantity: item.quantity,
-          pricingMode: targetPricingMode,
-        });
-        if (!estimate) {
-          throw new Error(`Cached ${getPricingModeLabel(targetPricingMode)} pricing is unavailable for ${matchedFlavor.resourceSpecCode} in ${item.region}`);
-        }
-
-        convertedItems.push(buildEcsCalculatorItemPayload(samplePayload, matchedFlavor, targetDisk, estimate, {
-          region: item.region,
-          quantity: item.quantity,
-          durationValue,
-          pricingMode: targetPricingMode,
-          diskType: targetDiskType,
-          diskSize: item.diskSize,
-          title: description,
-          description,
-        }));
-        continue;
-      }
-
-      const catalog = await getCatalog(item.region, "evs");
-      const catalogBody = catalog.response.body;
-      const targetDiskType = normalizeDiskTypeApiCode(item.diskType) || DEFAULT_CATALOG_DISK_TYPE;
-      const targetDisk = getCatalogDisks(catalogBody).find((disk) => disk.resourceSpecCode === targetDiskType);
-      if (!targetDisk) {
-        throw new Error(`Disk type ${targetDiskType} is unavailable in ${item.region}`);
-      }
-
-      const durationValue = getNormalizedDurationValue("ONDEMAND", String(item.hours));
-      const estimate = buildCatalogDiskPriceEstimate(catalogBody, {
-        diskType: targetDiskType,
-        diskSize: item.diskSize,
-        durationValue,
-        quantity: item.quantity,
-        pricingMode: "ONDEMAND",
-      });
-      if (!estimate) {
-        throw new Error(`Cached on-demand EVS pricing is unavailable for ${targetDiskType} in ${item.region}`);
-      }
-
-      convertedItems.push(buildEvsCalculatorItemPayload(item.payload, targetDisk, estimate, {
-        region: item.region,
-        quantity: item.quantity,
-        durationValue,
-        pricingMode: "ONDEMAND",
-        diskType: targetDiskType,
-        diskSize: item.diskSize,
-        title: description,
-        description,
-      }));
-    }
-
-    return convertedItems;
-  }
-
-  async function buildRegionConversionItems(detail: ShareCartDetail, targetRegion: string) {
-    const editTemplate = findTemplate(templates, "edit-cart");
-    const samplePayload = (editTemplate?.bodyJson && typeof editTemplate.bodyJson === "object")
-      ? (editTemplate.bodyJson as EditCartPayload).cartListData?.[0]
-      : null;
-    if (!samplePayload) {
-      throw new Error("Edit cart template is missing a sample ECS item");
-    }
-
-    const items = getRemoteCartItems(detail);
-    const ecsCatalog = await getCatalogForService(targetRegion, "ecs");
-    const evsCatalog = await getCatalogForService(targetRegion, "evs");
-    const ecsCatalogBody = ecsCatalog.response.body;
-    const evsCatalogBody = evsCatalog.response.body;
-
-    return Promise.all(items.map(async (item) => {
-      const description = resolveItemDescription(
-        item.description,
-        item.service === "ecs" ? item.resourceCode : DEFAULT_EVS_DESCRIPTION,
-      );
-
-      if (item.service === "ecs") {
-        const targetDiskType = normalizeDiskTypeApiCode(item.diskType) || DEFAULT_CATALOG_DISK_TYPE;
-        const targetDisk = getCatalogDisks(ecsCatalogBody).find((disk) => disk.resourceSpecCode === targetDiskType);
-        if (!targetDisk) {
-          throw new Error(`Disk type ${targetDiskType} is unavailable in ${targetRegion}`);
-        }
-
-        if (item.vcpus <= 0 || item.ramGb <= 0) {
-          throw new Error(`Unable to determine the source specs for ${description}. Region conversion requires both vCPU and RAM.`);
-        }
-
-        const targetFlavors = getCatalogFlavors(ecsCatalogBody);
-        const targetFlavor = selectCheapestFlavorForRequirements(targetFlavors, {
-          pricingMode: item.pricingMode,
-          minVcpus: item.vcpus,
-          minRamGb: item.ramGb,
-        });
-        if (!targetFlavor) {
-          throw new Error(`No ${getPricingModeLabel(item.pricingMode)} ECS in ${targetRegion} matches ${item.vcpus} vCPU / ${item.ramGb.toFixed(0)} GB RAM`);
-        }
-
-        const durationValue = getNormalizedDurationValue(item.pricingMode, String(item.hours));
-        const estimate = buildCatalogPriceEstimate(ecsCatalogBody, {
-          flavorCode: targetFlavor.resourceSpecCode,
-          diskType: targetDiskType,
-          diskSize: item.diskSize,
-          durationValue,
-          quantity: item.quantity,
-          pricingMode: item.pricingMode,
-        });
-        if (!estimate) {
-          throw new Error(`Cached ${getPricingModeLabel(item.pricingMode)} pricing is unavailable for ${targetFlavor.resourceSpecCode} in ${targetRegion}`);
-        }
-
-        return buildEcsCalculatorItemPayload(samplePayload, targetFlavor, targetDisk, estimate, {
-          region: targetRegion,
-          quantity: item.quantity,
-          durationValue,
-          pricingMode: item.pricingMode,
-          diskType: targetDiskType,
-          diskSize: item.diskSize,
-          title: description,
-          description,
-        });
-      }
-
-      const targetPricingMode = item.pricingMode === "RI" ? "ONDEMAND" : item.pricingMode as Exclude<CatalogPricingMode, "RI">;
-      const targetDiskType = normalizeDiskTypeApiCode(item.diskType) || DEFAULT_CATALOG_DISK_TYPE;
-      const targetDisk = getCatalogDisks(evsCatalogBody).find((disk) => disk.resourceSpecCode === targetDiskType);
-      if (!targetDisk) {
-        throw new Error(`Disk type ${targetDiskType} is unavailable in ${targetRegion}`);
-      }
-
-      const durationValue = getNormalizedDurationValue(targetPricingMode, String(item.hours));
-      const estimate = buildCatalogDiskPriceEstimate(evsCatalogBody, {
-        diskType: targetDiskType,
-        diskSize: item.diskSize,
-        durationValue,
-        quantity: item.quantity,
-        pricingMode: targetPricingMode,
-      });
-      if (!estimate) {
-        throw new Error(`Cached ${getPricingModeLabel(targetPricingMode, "evs")} pricing is unavailable for ${targetDiskType} in ${targetRegion}`);
-      }
-
-      return buildEvsCalculatorItemPayload(item.payload, targetDisk, estimate, {
-        region: targetRegion,
-        quantity: item.quantity,
-        durationValue,
-        pricingMode: targetPricingMode,
-        diskType: targetDiskType,
-        diskSize: item.diskSize,
-        title: description,
-        description,
-      });
-    }));
-  }
-
   async function createCart() {
     setCreateCartLoading(true);
     setAppError("");
@@ -2746,40 +2552,24 @@ export default function Home() {
     setAppError("");
 
     try {
-      const detail = currentCartDetail ?? await loadCartDetail(trimmedKey, false);
-      if (!detail) {
-        throw new Error("Load the selected cart before converting it");
-      }
-
-      const sourceName = detail.name?.trim() || selectedCartName.trim() || "Calculator cart";
-      const duplicateName = buildDuplicateCartName(
-        sourceName,
-        billingConversionMode === "RI" ? "RI ECS" : "Pay-per-use ECS",
-      );
-      const nextKey = await cloneCartToNewKey(detail, duplicateName);
-      const convertedItems = await buildBillingConversionItems(detail, billingConversionMode);
-      const nextPayload: EditCartPayload = {
-        billingMode: detail.billingMode || "cart.shareList.billingModeTotal",
-        cartListData: convertedItems.map((item) => cloneJson(item)),
-        name: duplicateName,
-        totalPrice: buildCartTotalPrice(convertedItems),
-      };
-
-      await submitCartUpdate(nextKey, nextPayload);
+      const result = await runCartConversion({
+        kind: "billing",
+        targetPricingMode: billingConversionMode,
+      });
       await refreshCarts();
       setCartDetailResult(null);
-      setSelectedCartKey(nextKey);
-      setSelectedCartName(duplicateName);
+      setSelectedCartKey(result.nextKey);
+      setSelectedCartName(result.duplicateName);
       setCartDetailCache((current) => {
-        if (!(nextKey in current)) {
+        if (!(result.nextKey in current)) {
           return current;
         }
 
         const next = { ...current };
-        delete next[nextKey];
+        delete next[result.nextKey];
         return next;
       });
-      setConversionSummary(`Created ${duplicateName} by duplicating ${sourceName} and converting ECS items to ${getPricingModeLabel(billingConversionMode)}. EVS stayed on-demand.`);
+      setConversionSummary(`Created ${result.duplicateName} by duplicating ${result.sourceName} and converting ECS items to ${getPricingModeLabel(billingConversionMode)}. EVS stayed on-demand.`);
     } catch (error) {
       setAppError(error instanceof Error ? error.message : "Failed to convert the selected cart billing mode");
     } finally {
@@ -2804,38 +2594,25 @@ export default function Home() {
     setAppError("");
 
     try {
-      const detail = currentCartDetail ?? await loadCartDetail(trimmedKey, false);
-      if (!detail) {
-        throw new Error("Load the selected cart before converting it");
-      }
-
-      const sourceName = detail.name?.trim() || selectedCartName.trim() || "Calculator cart";
       const regionLabel = regionConversionOptions.find((region) => region.id === targetRegion)?.name ?? targetRegion;
-      const duplicateName = buildDuplicateCartName(sourceName, regionLabel);
-      const nextKey = await cloneCartToNewKey(detail, duplicateName);
-      const convertedItems = await buildRegionConversionItems(detail, targetRegion);
-      const nextPayload: EditCartPayload = {
-        billingMode: detail.billingMode || "cart.shareList.billingModeTotal",
-        cartListData: convertedItems.map((item) => cloneJson(item)),
-        name: duplicateName,
-        totalPrice: buildCartTotalPrice(convertedItems),
-      };
-
-      await submitCartUpdate(nextKey, nextPayload);
+      const result = await runCartConversion({
+        kind: "region",
+        targetRegion,
+      });
       await refreshCarts();
       setCartDetailResult(null);
-      setSelectedCartKey(nextKey);
-      setSelectedCartName(duplicateName);
+      setSelectedCartKey(result.nextKey);
+      setSelectedCartName(result.duplicateName);
       setCartDetailCache((current) => {
-        if (!(nextKey in current)) {
+        if (!(result.nextKey in current)) {
           return current;
         }
 
         const next = { ...current };
-        delete next[nextKey];
+        delete next[result.nextKey];
         return next;
       });
-      setConversionSummary(`Created ${duplicateName} by duplicating ${sourceName} and converting all items to ${regionLabel}. ECS flavors were re-matched; EVS kept the same type and size.`);
+      setConversionSummary(`Created ${result.duplicateName} by duplicating ${result.sourceName} and converting all items to ${regionLabel}. ECS flavors were re-matched; EVS kept the same type and size.`);
     } catch (error) {
       setAppError(error instanceof Error ? error.message : "Failed to convert the selected cart region");
     } finally {
