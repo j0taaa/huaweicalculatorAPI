@@ -362,8 +362,10 @@ test("buildEcsSystemDiskPayload annualizes RI system disks for Huawei combine bi
       usageMeasureId: 4,
     }),
   ]);
-  expect((payload.inquiryResult as { amount?: number; perAmount?: number }).amount).toBe(39.2448);
-  expect((payload.inquiryResult as { amount?: number; perAmount?: number }).perAmount).toBe(3.2704);
+  expect((payload.inquiryResult as { amount?: number; perAmount?: number; installAmount?: number }).amount).toBe(39.2448);
+  expect((payload.inquiryResult as { amount?: number; perAmount?: number; installAmount?: number }).perAmount).toBe(3.2704);
+  expect((payload.inquiryResult as { amount?: number; perAmount?: number; installAmount?: number }).installAmount).toBe(0);
+  expect(payload.inquiryResult).not.toHaveProperty("measureId");
 });
 
 test("buildEcsImagePayload keeps only the target flavor family in the image compatibility list", () => {

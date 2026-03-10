@@ -418,7 +418,6 @@ export function buildEcsSystemDiskPayload(options: {
       cpqPurchaseDuration: RI_YEARLY_HOURS,
       __hydratedPricingModes: undefined,
       inquiryResult: {
-        ...existingInquiry,
         id: diskRating?.id ?? existingInquiry.id,
         productId: diskRating?.productId ?? normalizedRiPlan?.productId ?? disk.productId ?? existingDiskInfo.productId,
         amount: diskAnnualTotal,
@@ -427,9 +426,7 @@ export function buildEcsSystemDiskPayload(options: {
         perAmount: diskMonthlyTotal,
         perDiscountAmount: 0,
         perOriginalAmount: 0,
-        perPeriodType: null,
-        measureId: 1,
-        extendParams: null,
+        installAmount: 0,
       },
     };
   }
