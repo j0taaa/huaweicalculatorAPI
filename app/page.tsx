@@ -371,7 +371,7 @@ function getPricingRateLabel(pricingMode: CatalogPricingMode): string {
     case "YEARLY":
       return "Base yearly price";
     case "RI":
-      return "1-year RI price";
+      return "1-year RI purchase price";
     default:
       return "Base hourly price";
   }

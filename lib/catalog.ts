@@ -320,15 +320,11 @@ function getPreferredRiPrice(plans: CatalogPlan[]): number {
     return preferredRiPrice;
   }
 
-  const fallbackRiPrice = getLowestPlanAmount(plans.filter((plan) => (
-    plan.originType !== "perEffectivePrice" && plan.amountType !== "nodeData.perEffectivePrice"
-  )));
-  if (Number.isFinite(fallbackRiPrice)) {
-    return fallbackRiPrice;
-  }
-
   return getLowestPlanAmount(plans.filter((plan) => (
-    plan.originType === "perEffectivePrice" || plan.amountType === "nodeData.perEffectivePrice"
+    (plan.originType === "price" || plan.amountType === "nodeData.price")
+    && typeof plan.amount === "number"
+    && Number.isFinite(plan.amount)
+    && plan.amount > 0
   )));
 }
 
@@ -342,11 +338,6 @@ function getCatalogItemBasePrice(item: CatalogPricedItem, pricingMode: CatalogPr
     const oneYearRiPrice = getPreferredRiPrice(oneYearRiPlans);
     if (Number.isFinite(oneYearRiPrice)) {
       return oneYearRiPrice;
-    }
-
-    const genericRiPrice = getPreferredRiPrice(matchingPlans);
-    if (Number.isFinite(genericRiPrice)) {
-      return genericRiPrice;
     }
   } else {
     const matchedPrice = getLowestPlanAmount(matchingPlans);
@@ -378,6 +369,10 @@ export function hasCatalogPricingModeSupport(
   item: ProductFlavor | ProductDisk,
   pricingMode: CatalogPricingMode,
 ): boolean {
+  if (pricingMode === "RI") {
+    return Number.isFinite(getCatalogItemBasePrice(item, "RI"));
+  }
+
   const nativePlans = getNativeCatalogPlans(item);
 
   if (pricingMode === "ONDEMAND") {

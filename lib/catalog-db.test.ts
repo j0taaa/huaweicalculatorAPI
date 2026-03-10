@@ -58,8 +58,8 @@ describe("catalog DB hydration", () => {
     const entry = makeEntry(
       makeFlavor("x0.8u.64g.linux", {
         planList: [
-          { billingMode: "RI", originType: "price", amount: 0 },
-          { billingMode: "RI", originType: "perPrice", amount: 104.68 },
+          { billingMode: "RI", originType: "price", periodNum: 1, amount: 0 },
+          { billingMode: "RI", originType: "perPrice", periodNum: 1, amount: 104.68 },
         ],
       }),
       makeDisk("GPSSD", {}),

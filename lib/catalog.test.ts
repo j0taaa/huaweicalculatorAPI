@@ -76,8 +76,8 @@ describe("catalog helpers", () => {
       makeFlavor("c9.large", {
         productId: "cheap",
         planList: [
-          { billingMode: "RI", originType: "price", amount: 0 },
-          { billingMode: "RI", originType: "perPrice", amount: 40 },
+          { billingMode: "RI", originType: "price", periodNum: 1, amount: 0 },
+          { billingMode: "RI", originType: "perPrice", periodNum: 1, amount: 40 },
         ],
       }),
       makeFlavor("c9.large", {
@@ -107,7 +107,7 @@ describe("catalog helpers", () => {
             planList: [{ billingMode: "MONTHLY", amount: 60 }],
           }),
           makeFlavor("x1.small", {
-            planList: [{ billingMode: "RI", originType: "perPrice", amount: 30 }],
+            planList: [{ billingMode: "RI", originType: "perPrice", periodNum: 1, amount: 30 }],
           }),
           makeFlavor("x1.medium", { amount: 12 }),
         ],
@@ -189,6 +189,15 @@ describe("catalog helpers", () => {
     }), "ONDEMAND")).toBe(true);
   });
 
+  test("hasCatalogPricingModeSupport requires a 1-year RI purchase price", () => {
+    expect(hasCatalogPricingModeSupport(makeFlavor("x1.large", {
+      planList: [
+        { billingMode: "RI", originType: "perPrice", periodNum: 3, amount: 40.04 },
+        { billingMode: "RI", originType: "perEffectivePrice", periodNum: 1, amount: 0.0617 },
+      ],
+    }), "RI")).toBe(false);
+  });
+
   test("selectCheapestFlavorForRequirements picks the cheapest flavor that meets minimum specs", () => {
     const flavors = [
       makeFlavor("vm.small", {
@@ -262,6 +271,24 @@ describe("catalog helpers", () => {
     expect(getFlavorBasePrice(flavor, "MONTHLY")).toBe(33.85);
     expect(getFlavorBasePrice(flavor, "YEARLY")).toBe(310.28);
     expect(getFlavorBasePrice(flavor, "RI")).toBe(45.04);
+  });
+
+  test("getFlavorBasePrice only uses the 1-year RI purchase price", () => {
+    const threeYearOnly = makeFlavor("x1.large", {
+      planList: [
+        { billingMode: "RI", originType: "perPrice", periodNum: 3, amount: 40.04 },
+        { billingMode: "RI", originType: "perEffectivePrice", periodNum: 1, amount: 0.0617 },
+      ],
+    });
+    const effectiveOnly = makeFlavor("x1.medium", {
+      planList: [
+        { billingMode: "RI", originType: "price", periodNum: 1, amount: 0 },
+        { billingMode: "RI", originType: "perEffectivePrice", periodNum: 1, amount: 0.0912 },
+      ],
+    });
+
+    expect(getFlavorBasePrice(threeYearOnly, "RI")).toBe(Number.POSITIVE_INFINITY);
+    expect(getFlavorBasePrice(effectiveOnly, "RI")).toBe(Number.POSITIVE_INFINITY);
   });
 
   test("getEffectiveDiskPricingMode falls back to ONDEMAND for RI", () => {
@@ -420,6 +447,37 @@ describe("catalog helpers", () => {
         },
       ],
     });
+  });
+
+  test("buildCatalogPriceEstimate returns null when a 1-year RI purchase price is unavailable", () => {
+    const estimate = buildCatalogPriceEstimate({
+      product: {
+        ec2_vm: [
+          makeFlavor("x1.small", {
+            productId: "vm-ri",
+            planList: [
+              { billingMode: "RI", originType: "perPrice", periodNum: 3, amount: 40.04 },
+              { billingMode: "RI", originType: "perEffectivePrice", periodNum: 1, amount: 0.0617 },
+            ],
+          }),
+        ],
+        ebs_volume: [
+          makeDisk("GPSSD", {
+            productId: "disk-ondemand",
+            bakPlanList: [{ billingMode: "ONDEMAND", amount: 0.01 }],
+          }),
+        ],
+      },
+    }, {
+      flavorCode: "x1.small",
+      diskType: "GPSSD",
+      diskSize: 40,
+      durationValue: 24,
+      quantity: 1,
+      pricingMode: "RI",
+    });
+
+    expect(estimate).toBeNull();
   });
 
   test("buildCatalogDiskPriceEstimate calculates ONDEMAND EVS totals from cached catalog data", () => {
