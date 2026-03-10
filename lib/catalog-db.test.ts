@@ -76,7 +76,7 @@ describe("catalog DB hydration", () => {
     const disk = (hydrated.response.body as { product: { ebs_volume: ProductDisk[] } }).product.ebs_volume[0]!;
 
     expect(getFlavorBasePrice(flavor, "ONDEMAND")).toBe(0.3584);
-    expect(getFlavorBasePrice(flavor, "RI")).toBe(104.68);
+    expect(getFlavorBasePrice(flavor, "RI")).toBe(1256.16);
     expect(getDiskBasePrice(disk, "ONDEMAND")).toBe(0.000247);
   });
 

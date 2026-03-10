@@ -371,7 +371,7 @@ function getPricingRateLabel(pricingMode: CatalogPricingMode): string {
     case "YEARLY":
       return "Base yearly price";
     case "RI":
-      return "1-year RI purchase price";
+      return "1-year RI total price";
     default:
       return "Base hourly price";
   }
@@ -3742,7 +3742,7 @@ export default function Home() {
                       <div>
                         <label className="label">RI pricing</label>
                         <div className="field flex min-h-11 items-center bg-slate-50 text-sm text-slate-600">
-                          One-time 1-year RI purchase price per instance
+                          Total 1-year RI price per instance
                         </div>
                       </div>
                     ) : (
@@ -3820,7 +3820,7 @@ export default function Home() {
                       ) : null}
                       {catalogPricingMode === "RI" ? (
                         <p className="mt-3 text-sm text-slate-600">
-                          RI uses Huawei&apos;s 1-year RI purchase price. Disk pricing is excluded because the cached disk catalog does not expose RI plans.
+                          RI uses Huawei&apos;s 1-year total RI price. Disk pricing is excluded because the cached disk catalog does not expose RI plans.
                         </p>
                       ) : null}
                       <p className="mt-4 text-sm leading-6 text-slate-600">

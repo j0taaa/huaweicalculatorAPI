@@ -92,7 +92,7 @@ describe("catalog helpers", () => {
     expect(getFlavorBasePrice(deduped[0]!, "ONDEMAND")).toBe(9);
     expect(getFlavorBasePrice(deduped[0]!, "MONTHLY")).toBe(90);
     expect(getFlavorBasePrice(deduped[0]!, "YEARLY")).toBe(800);
-    expect(getFlavorBasePrice(deduped[0]!, "RI")).toBe(40);
+    expect(getFlavorBasePrice(deduped[0]!, "RI")).toBe(480);
   });
 
   test("getCatalogFlavors returns merged flavors from a catalog body", () => {
@@ -120,7 +120,7 @@ describe("catalog helpers", () => {
       ["x1.medium", 12],
     ]);
     expect(getFlavorBasePrice(flavors[0]!, "MONTHLY")).toBe(60);
-    expect(getFlavorBasePrice(flavors[0]!, "RI")).toBe(30);
+    expect(getFlavorBasePrice(flavors[0]!, "RI")).toBe(360);
   });
 
   test("getCatalogFlavors filters hidden entries and generations not enabled in Huawei calculator config", () => {
@@ -282,10 +282,10 @@ describe("catalog helpers", () => {
 
     expect(getFlavorBasePrice(flavor, "MONTHLY")).toBe(33.85);
     expect(getFlavorBasePrice(flavor, "YEARLY")).toBe(310.28);
-    expect(getFlavorBasePrice(flavor, "RI")).toBe(45.04);
+    expect(getFlavorBasePrice(flavor, "RI")).toBe(540.48);
   });
 
-  test("getFlavorBasePrice only uses the 1-year RI purchase price", () => {
+  test("getFlavorBasePrice only uses the 1-year RI total price", () => {
     const threeYearOnly = makeFlavor("x1.large", {
       planList: [
         { billingMode: "RI", originType: "perPrice", periodNum: 3, amount: 40.04 },
@@ -314,7 +314,7 @@ describe("catalog helpers", () => {
       ],
     });
 
-    expect(getFlavorBasePrice(flavor, "RI")).toBe(45.04);
+    expect(getFlavorBasePrice(flavor, "RI")).toBe(540.48);
   });
 
   test("getEffectiveDiskPricingMode falls back to ONDEMAND for RI", () => {
@@ -452,17 +452,17 @@ describe("catalog helpers", () => {
     });
 
     expect(estimate).toEqual({
-      amount: 45.04,
+      amount: 540.48,
       discountAmount: 0,
-      originalAmount: 45.04,
+      originalAmount: 540.48,
       currency: "USD",
       productRatingResult: [
         {
           id: "cached-vm-vm-ri",
           productId: "vm-ri",
-          amount: 45.04,
+          amount: 540.48,
           discountAmount: 0,
-          originalAmount: 45.04,
+          originalAmount: 540.48,
         },
         {
           id: "cached-disk-disk-ondemand",

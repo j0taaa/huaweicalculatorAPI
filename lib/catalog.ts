@@ -191,6 +191,8 @@ type CatalogPricedItem = {
   };
 };
 
+const ONE_YEAR_RI_TERM_MONTHS = 12;
+
 function getFlavorPlanCount(flavor: ProductFlavor): number {
   return (flavor.planList?.length ?? 0) + (flavor.bakPlanList?.length ?? 0);
 }
@@ -352,7 +354,7 @@ function getCatalogItemBasePrice(item: CatalogPricedItem, pricingMode: CatalogPr
     const oneYearRiPlans = nativeRiPlans.filter((plan) => plan.periodNum === 1);
     const oneYearRiPrice = getPreferredRiPrice(oneYearRiPlans);
     if (Number.isFinite(oneYearRiPrice)) {
-      return oneYearRiPrice;
+      return oneYearRiPrice * ONE_YEAR_RI_TERM_MONTHS;
     }
 
     // Some Huawei catalog snapshots omit `periodNum` on native RI plans while
@@ -366,13 +368,13 @@ function getCatalogItemBasePrice(item: CatalogPricedItem, pricingMode: CatalogPr
     if (nativeUntypedRiPurchasePlans.length >= 2) {
       const inferredOneYearRiPrice = getHighestPlanAmount(nativeUntypedRiPurchasePlans);
       if (Number.isFinite(inferredOneYearRiPrice)) {
-        return inferredOneYearRiPrice;
+        return inferredOneYearRiPrice * ONE_YEAR_RI_TERM_MONTHS;
       }
     }
 
     const singleNativeRiPurchasePrice = getPreferredRiPrice(nativeUntypedRiPurchasePlans);
     if (Number.isFinite(singleNativeRiPurchasePrice)) {
-      return singleNativeRiPurchasePrice;
+      return singleNativeRiPurchasePrice * ONE_YEAR_RI_TERM_MONTHS;
     }
   } else {
     const matchedPrice = getLowestPlanAmount(matchingPlans);
