@@ -166,6 +166,9 @@ describe("catalog helpers", () => {
     expect(getFlavorMemoryGb(makeFlavor("c6.xlarge", {
       mem: "32 GB",
     }))).toBe(32);
+
+    expect(getFlavorCpuCount(makeFlavor("x1.2u.4g.linux"))).toBe(2);
+    expect(getFlavorMemoryGb(makeFlavor("x1.2u.4g.linux"))).toBe(4);
   });
 
   test("selectCheapestFlavorForRequirements picks the cheapest flavor that meets minimum specs", () => {

@@ -368,6 +368,18 @@ export function getFlavorBasePrice(flavor: ProductFlavor, pricingMode: CatalogPr
   return getCatalogItemBasePrice(flavor, pricingMode);
 }
 
+function getFlavorSpecsFromResourceCode(resourceSpecCode: string): { vcpus: number; ramGb: number } | null {
+  const match = resourceSpecCode.match(/(?:^|\.)(\d+)u\.(\d+(?:\.\d+)?)g(?:\.|$)/i);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    vcpus: Number.parseInt(match[1], 10),
+    ramGb: Number.parseFloat(match[2]),
+  };
+}
+
 export function getFlavorCpuCount(flavor: ProductFlavor): number {
   const spec = flavor.productSpecSysDesc ?? "";
   const specMatch = spec.match(/vCPUs:(\d+)CORE/i);
@@ -377,7 +389,11 @@ export function getFlavorCpuCount(flavor: ProductFlavor): number {
 
   const cpuText = flavor.cpu ?? "";
   const cpuMatch = cpuText.match(/(\d+)/);
-  return cpuMatch ? Number.parseInt(cpuMatch[1], 10) : 0;
+  if (cpuMatch) {
+    return Number.parseInt(cpuMatch[1], 10);
+  }
+
+  return getFlavorSpecsFromResourceCode(flavor.resourceSpecCode)?.vcpus ?? 0;
 }
 
 export function getFlavorMemoryGb(flavor: ProductFlavor): number {
@@ -389,7 +405,11 @@ export function getFlavorMemoryGb(flavor: ProductFlavor): number {
 
   const memText = flavor.mem ?? "";
   const memMatch = memText.match(/(\d+(?:\.\d+)?)/);
-  return memMatch ? Number.parseFloat(memMatch[1]) : 0;
+  if (memMatch) {
+    return Number.parseFloat(memMatch[1]);
+  }
+
+  return getFlavorSpecsFromResourceCode(flavor.resourceSpecCode)?.ramGb ?? 0;
 }
 
 export function getDiskBasePrice(disk: ProductDisk, pricingMode: CatalogPricingMode = "ONDEMAND"): number {

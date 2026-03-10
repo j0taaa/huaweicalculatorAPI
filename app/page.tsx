@@ -2357,18 +2357,16 @@ export default function Home() {
           throw new Error(`Disk type ${targetDiskType} is unavailable in ${targetRegion}`);
         }
 
+        if (item.vcpus <= 0 || item.ramGb <= 0) {
+          throw new Error(`Unable to determine the source specs for ${description}. Region conversion requires both vCPU and RAM.`);
+        }
+
         const targetFlavors = getCatalogFlavors(ecsCatalogBody);
-        const exactFlavor = targetFlavors.find((flavor) => (
-          flavor.resourceSpecCode === item.resourceCode
-          && Number.isFinite(getFlavorBasePrice(flavor, item.pricingMode))
-        ));
-        const targetFlavor = item.vcpus > 0 && item.ramGb > 0
-          ? selectCheapestFlavorForRequirements(targetFlavors, {
-              pricingMode: item.pricingMode,
-              minVcpus: item.vcpus,
-              minRamGb: item.ramGb,
-            })
-          : exactFlavor;
+        const targetFlavor = selectCheapestFlavorForRequirements(targetFlavors, {
+          pricingMode: item.pricingMode,
+          minVcpus: item.vcpus,
+          minRamGb: item.ramGb,
+        });
         if (!targetFlavor) {
           throw new Error(`No ${getPricingModeLabel(item.pricingMode)} ECS in ${targetRegion} matches ${item.vcpus} vCPU / ${item.ramGb.toFixed(0)} GB RAM`);
         }
