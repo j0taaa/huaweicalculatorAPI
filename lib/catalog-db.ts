@@ -260,16 +260,20 @@ function ensureCatalogPlanAmount<T extends ProductFlavor | ProductDisk>(
         amountType: "nodeData.perPrice",
         periodNum: 1,
         amount,
+        source: "price_api",
       });
     } else {
       planList.push({
         billingMode: pricingMode,
         amount,
+        source: "price_api",
       });
     }
   }
 
   next.planList = planList;
+  const hydratedModes = Array.isArray(next.__hydratedPricingModes) ? next.__hydratedPricingModes : [];
+  next.__hydratedPricingModes = Array.from(new Set([...hydratedModes, pricingMode]));
   if (pricingMode === "ONDEMAND") {
     next.amount = amount;
   }

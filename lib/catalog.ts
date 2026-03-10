@@ -172,6 +172,7 @@ type CatalogPlan = {
   measureUnit?: number | null;
   usageFactor?: string;
   usageMeasureId?: number;
+  source?: string;
   [key: string]: unknown;
 };
 
@@ -181,6 +182,7 @@ type CatalogPricedItem = {
   productId?: string;
   planList?: CatalogPlan[];
   bakPlanList?: CatalogPlan[];
+  __hydratedPricingModes?: CatalogPricingMode[];
   inquiryResult?: {
     id?: string;
     productId?: string;
@@ -195,6 +197,10 @@ function getFlavorPlanCount(flavor: ProductFlavor): number {
 
 function getCatalogPlans(item: CatalogPricedItem): CatalogPlan[] {
   return [...(item.planList ?? []), ...(item.bakPlanList ?? [])];
+}
+
+function getNativeCatalogPlans(item: CatalogPricedItem): CatalogPlan[] {
+  return getCatalogPlans(item).filter((plan) => plan.source !== "price_api");
 }
 
 function isPresentValue(value: unknown): boolean {
@@ -368,6 +374,28 @@ export function getFlavorBasePrice(flavor: ProductFlavor, pricingMode: CatalogPr
   return getCatalogItemBasePrice(flavor, pricingMode);
 }
 
+export function hasCatalogPricingModeSupport(
+  item: ProductFlavor | ProductDisk,
+  pricingMode: CatalogPricingMode,
+): boolean {
+  const nativePlans = getNativeCatalogPlans(item);
+
+  if (pricingMode === "ONDEMAND") {
+    if (nativePlans.some((plan) => plan.billingMode === "ONDEMAND" && typeof plan.amount === "number" && Number.isFinite(plan.amount))) {
+      return true;
+    }
+
+    const hydratedModes = Array.isArray(item.__hydratedPricingModes) ? item.__hydratedPricingModes : [];
+    if (hydratedModes.includes("ONDEMAND")) {
+      return false;
+    }
+
+    return typeof item.amount === "number" && Number.isFinite(item.amount);
+  }
+
+  return nativePlans.some((plan) => plan.billingMode === pricingMode && typeof plan.amount === "number" && Number.isFinite(plan.amount));
+}
+
 function getFlavorSpecsFromResourceCode(resourceSpecCode: string): { vcpus: number; ramGb: number } | null {
   const match = resourceSpecCode.match(/(?:^|\.)(\d+)u\.(\d+(?:\.\d+)?)g(?:\.|$)/i);
   if (!match) {
@@ -434,6 +462,7 @@ export function selectCheapestFlavorForRequirements(
   return flavors
     .filter((flavor) => getFlavorCpuCount(flavor) >= minVcpus)
     .filter((flavor) => getFlavorMemoryGb(flavor) >= minRamGb)
+    .filter((flavor) => hasCatalogPricingModeSupport(flavor, requirements.pricingMode))
     .filter((flavor) => Number.isFinite(getFlavorBasePrice(flavor, requirements.pricingMode)))
     .sort((left, right) => {
       const leftPrice = getFlavorBasePrice(left, requirements.pricingMode);

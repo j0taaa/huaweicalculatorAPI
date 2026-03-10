@@ -10,6 +10,7 @@ import {
   getFlavorBasePrice,
   getFlavorCpuCount,
   getFlavorMemoryGb,
+  hasCatalogPricingModeSupport,
   selectCheapestFlavorForRequirements,
   type ProductDisk,
   type ProductFlavor,
@@ -169,6 +170,23 @@ describe("catalog helpers", () => {
 
     expect(getFlavorCpuCount(makeFlavor("x1.2u.4g.linux"))).toBe(2);
     expect(getFlavorMemoryGb(makeFlavor("x1.2u.4g.linux"))).toBe(4);
+  });
+
+  test("hasCatalogPricingModeSupport ignores synthetic ONDEMAND hydration", () => {
+    expect(hasCatalogPricingModeSupport(makeFlavor("x1.2u.4g.linux", {
+      amount: 0.1234,
+      __hydratedPricingModes: ["ONDEMAND"],
+      planList: [
+        { billingMode: "RI", originType: "perPrice", amount: 20.07 },
+        { billingMode: "ONDEMAND", amount: 0.1234, source: "price_api" },
+      ],
+    }), "ONDEMAND")).toBe(false);
+
+    expect(hasCatalogPricingModeSupport(makeFlavor("c6.2u.4g.linux", {
+      planList: [
+        { billingMode: "ONDEMAND", amount: 0.344 },
+      ],
+    }), "ONDEMAND")).toBe(true);
   });
 
   test("selectCheapestFlavorForRequirements picks the cheapest flavor that meets minimum specs", () => {

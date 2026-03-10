@@ -11,6 +11,7 @@ import {
   getFlavorBasePrice,
   getFlavorCpuCount,
   getFlavorMemoryGb,
+  hasCatalogPricingModeSupport,
   selectCheapestFlavorForRequirements,
   type CatalogPricingMode,
   type PriceResponseBody,
@@ -1474,6 +1475,7 @@ export default function Home() {
       })
       .filter((flavor) => getFlavorCpuCount(flavor) >= (Number.parseInt(catalogMinVcpu, 10) || 0))
       .filter((flavor) => getFlavorMemoryGb(flavor) >= (Number.parseInt(catalogMinRam, 10) || 0))
+      .filter((flavor) => hasCatalogPricingModeSupport(flavor, catalogPricingMode))
       .sort((left, right) => {
         const leftPrice = getFlavorBasePrice(left, catalogPricingMode);
         const rightPrice = getFlavorBasePrice(right, catalogPricingMode);
@@ -1483,7 +1485,7 @@ export default function Home() {
   const selectedFlavor = getSelectedFlavor(flavors, selectedFlavorCode);
   const selectedDisk = disks.find((disk) => disk.resourceSpecCode === configDiskType) ?? null;
   const selectedFlavorPrice = selectedFlavor ? getFlavorBasePrice(selectedFlavor, catalogPricingMode) : Number.POSITIVE_INFINITY;
-  const selectedFlavorSupportsPricingMode = Number.isFinite(selectedFlavorPrice);
+  const selectedFlavorSupportsPricingMode = Boolean(selectedFlavor && hasCatalogPricingModeSupport(selectedFlavor, catalogPricingMode) && Number.isFinite(selectedFlavorPrice));
   const selectedDiskPrice = selectedDisk && selectedService === "evs"
     ? getDiskBasePrice(selectedDisk, catalogPricingMode as Exclude<CatalogPricingMode, "RI">)
     : Number.POSITIVE_INFINITY;
@@ -2269,6 +2271,7 @@ export default function Home() {
         const targetFlavors = getCatalogFlavors(catalogBody);
         const currentFlavor = targetFlavors.find((flavor) => (
           flavor.resourceSpecCode === item.resourceCode
+          && hasCatalogPricingModeSupport(flavor, targetPricingMode)
           && Number.isFinite(getFlavorBasePrice(flavor, targetPricingMode))
         ));
         const matchedFlavor = currentFlavor ?? selectCheapestFlavorForRequirements(targetFlavors, {
