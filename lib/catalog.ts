@@ -312,9 +312,13 @@ function getLowestPlanAmount(plans: CatalogPlan[]): number {
   return amounts.length ? Math.min(...amounts) : Number.POSITIVE_INFINITY;
 }
 
+function isRiPurchasePricePlan(plan: CatalogPlan): boolean {
+  return plan.originType === "perPrice" || plan.amountType === "nodeData.perPrice";
+}
+
 function getPreferredRiPrice(plans: CatalogPlan[]): number {
   const preferredRiPrice = getLowestPlanAmount(plans.filter((plan) => (
-    plan.originType === "perPrice" || plan.amountType === "nodeData.perPrice"
+    isRiPurchasePricePlan(plan)
   )));
   if (Number.isFinite(preferredRiPrice)) {
     return preferredRiPrice;
@@ -338,6 +342,23 @@ function getCatalogItemBasePrice(item: CatalogPricedItem, pricingMode: CatalogPr
     const oneYearRiPrice = getPreferredRiPrice(oneYearRiPlans);
     if (Number.isFinite(oneYearRiPrice)) {
       return oneYearRiPrice;
+    }
+
+    // Some Huawei catalog snapshots omit `periodNum` on native RI plans but still
+    // return separate 1-year and 3-year purchase totals. In that case, the
+    // lower RI purchase total corresponds to the 1-year reservation.
+    const nativeUntypedRiPurchasePlans = getNativeCatalogPlans(item).filter((plan) => (
+      plan.billingMode === "RI"
+      && typeof plan.amount === "number"
+      && Number.isFinite(plan.amount)
+      && (plan.periodNum === undefined || plan.periodNum === null)
+      && isRiPurchasePricePlan(plan)
+    ));
+    if (nativeUntypedRiPurchasePlans.length >= 2) {
+      const inferredOneYearRiPrice = getLowestPlanAmount(nativeUntypedRiPurchasePlans);
+      if (Number.isFinite(inferredOneYearRiPrice)) {
+        return inferredOneYearRiPrice;
+      }
     }
   } else {
     const matchedPrice = getLowestPlanAmount(matchingPlans);

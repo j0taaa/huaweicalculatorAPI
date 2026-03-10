@@ -198,6 +198,17 @@ describe("catalog helpers", () => {
     }), "RI")).toBe(false);
   });
 
+  test("hasCatalogPricingModeSupport can infer 1-year RI from native untyped purchase totals", () => {
+    expect(hasCatalogPricingModeSupport(makeFlavor("x1.large", {
+      planList: [
+        { billingMode: "RI", originType: "price", amount: 0 },
+        { billingMode: "RI", originType: "perPrice", amount: 40.04 },
+        { billingMode: "RI", originType: "price", amount: 0 },
+        { billingMode: "RI", originType: "perPrice", amount: 45.04 },
+      ],
+    }), "RI")).toBe(true);
+  });
+
   test("selectCheapestFlavorForRequirements picks the cheapest flavor that meets minimum specs", () => {
     const flavors = [
       makeFlavor("vm.small", {
@@ -289,6 +300,19 @@ describe("catalog helpers", () => {
 
     expect(getFlavorBasePrice(threeYearOnly, "RI")).toBe(Number.POSITIVE_INFINITY);
     expect(getFlavorBasePrice(effectiveOnly, "RI")).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  test("getFlavorBasePrice falls back to the lowest native RI purchase total when periodNum is missing", () => {
+    const flavor = makeFlavor("x1.small", {
+      planList: [
+        { billingMode: "RI", originType: "price", amount: 0 },
+        { billingMode: "RI", originType: "perPrice", amount: 40.04 },
+        { billingMode: "RI", originType: "price", amount: 0 },
+        { billingMode: "RI", originType: "perPrice", amount: 45.04 },
+      ],
+    });
+
+    expect(getFlavorBasePrice(flavor, "RI")).toBe(40.04);
   });
 
   test("getEffectiveDiskPricingMode falls back to ONDEMAND for RI", () => {
