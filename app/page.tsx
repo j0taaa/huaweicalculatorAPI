@@ -32,6 +32,7 @@ import {
   normalizeDiskTypeApiCode,
 } from "@/lib/disk-types";
 import {
+  buildEcsImagePayload,
   buildEcsSystemDiskPayload,
   getEcsSystemDiskStepperType,
 } from "@/lib/ecs-payload";
@@ -1042,11 +1043,11 @@ function buildEcsCalculatorItemPayload(
     },
   };
 
-  productAllInfos[1] = {
-    ...imageInfo,
-    productNum: config.durationValue,
-    durationNum: config.durationValue,
-  };
+  productAllInfos[1] = buildEcsImagePayload({
+    existingImageInfo: imageInfo,
+    flavor,
+    durationValue: config.durationValue,
+  });
 
   productAllInfos[2] = buildEcsSystemDiskPayload({
     existingDiskInfo: diskInfo,
@@ -2238,6 +2239,14 @@ export default function Home() {
   }
 
   async function buildBillingConversionItems(detail: ShareCartDetail, targetPricingMode: "ONDEMAND" | "RI") {
+    const editTemplate = findTemplate(templates, "edit-cart");
+    const samplePayload = (editTemplate?.bodyJson && typeof editTemplate.bodyJson === "object")
+      ? (editTemplate.bodyJson as EditCartPayload).cartListData?.[0]
+      : null;
+    if (!samplePayload) {
+      throw new Error("Edit cart template is missing a sample ECS item");
+    }
+
     const items = getRemoteCartItems(detail);
     const catalogs = new Map<string, CatalogCacheResult>();
     const getCatalog = async (region: string, service: CalculatorService) => {
@@ -2295,7 +2304,7 @@ export default function Home() {
           throw new Error(`Cached ${getPricingModeLabel(targetPricingMode)} pricing is unavailable for ${matchedFlavor.resourceSpecCode} in ${item.region}`);
         }
 
-        return buildEcsCalculatorItemPayload(item.payload, matchedFlavor, targetDisk, estimate, {
+        return buildEcsCalculatorItemPayload(samplePayload, matchedFlavor, targetDisk, estimate, {
           region: item.region,
           quantity: item.quantity,
           durationValue,
@@ -2341,6 +2350,14 @@ export default function Home() {
   }
 
   async function buildRegionConversionItems(detail: ShareCartDetail, targetRegion: string) {
+    const editTemplate = findTemplate(templates, "edit-cart");
+    const samplePayload = (editTemplate?.bodyJson && typeof editTemplate.bodyJson === "object")
+      ? (editTemplate.bodyJson as EditCartPayload).cartListData?.[0]
+      : null;
+    if (!samplePayload) {
+      throw new Error("Edit cart template is missing a sample ECS item");
+    }
+
     const items = getRemoteCartItems(detail);
     const ecsCatalog = await getCatalogForService(targetRegion, "ecs");
     const evsCatalog = await getCatalogForService(targetRegion, "evs");
@@ -2387,7 +2404,7 @@ export default function Home() {
           throw new Error(`Cached ${getPricingModeLabel(item.pricingMode)} pricing is unavailable for ${targetFlavor.resourceSpecCode} in ${targetRegion}`);
         }
 
-        return buildEcsCalculatorItemPayload(item.payload, targetFlavor, targetDisk, estimate, {
+        return buildEcsCalculatorItemPayload(samplePayload, targetFlavor, targetDisk, estimate, {
           region: targetRegion,
           quantity: item.quantity,
           durationValue,

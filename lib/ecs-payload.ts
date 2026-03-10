@@ -1,4 +1,5 @@
 import { getEffectiveDiskPricingMode, type CatalogPricingMode, type PriceResponseBody, type ProductDisk } from "@/lib/catalog";
+import type { ProductFlavor } from "@/lib/catalog";
 
 type PriceRating = NonNullable<PriceResponseBody["productRatingResult"]>[number];
 
@@ -65,5 +66,36 @@ export function buildEcsSystemDiskPayload(options: {
       measureId: 1,
       extendParams: null,
     },
+  };
+}
+
+function getFlavorFamily(flavor: ProductFlavor): string {
+  if (typeof flavor.resourceSpecType === "string" && flavor.resourceSpecType.trim()) {
+    return flavor.resourceSpecType.trim();
+  }
+
+  const match = flavor.resourceSpecCode.match(/^([^.]+)/);
+  return match?.[1]?.trim() ?? "";
+}
+
+export function buildEcsImagePayload(options: {
+  existingImageInfo: Record<string, unknown>;
+  flavor: ProductFlavor;
+  durationValue: number;
+}): Record<string, unknown> {
+  const { existingImageInfo, flavor, durationValue } = options;
+  const family = getFlavorFamily(flavor);
+  const existingTypes = Array.isArray(existingImageInfo.type)
+    ? existingImageInfo.type.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    : [];
+  const nextTypes = family
+    ? [family, ...existingTypes.filter((entry) => entry !== family)]
+    : existingTypes;
+
+  return {
+    ...existingImageInfo,
+    ...(nextTypes.length ? { type: nextTypes } : {}),
+    productNum: durationValue,
+    durationNum: durationValue,
   };
 }

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildEcsSystemDiskPayload, getEcsSystemDiskStepperType } from "@/lib/ecs-payload";
+import { buildEcsImagePayload, buildEcsSystemDiskPayload, getEcsSystemDiskStepperType } from "@/lib/ecs-payload";
 
 test("getEcsSystemDiskStepperType prefers the catalog disk token", () => {
   expect(getEcsSystemDiskStepperType(
@@ -69,4 +69,22 @@ test("buildEcsSystemDiskPayload keeps disk pricing on-demand for RI ECS items", 
   });
 
   expect(payload.billingMode).toBe("ONDEMAND");
+});
+
+test("buildEcsImagePayload promotes the target flavor family in the image compatibility list", () => {
+  const payload = buildEcsImagePayload({
+    existingImageInfo: {
+      id: "old-image",
+      type: ["x1", "c6", "c7"],
+    },
+    flavor: {
+      resourceSpecCode: "c6.2u.4g.linux",
+      resourceSpecType: "c6",
+    },
+    durationValue: 744,
+  });
+
+  expect(payload.type).toEqual(["c6", "x1", "c7"]);
+  expect(payload.productNum).toBe(744);
+  expect(payload.durationNum).toBe(744);
 });
