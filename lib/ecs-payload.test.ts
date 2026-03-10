@@ -21,7 +21,17 @@ test("buildEcsSystemDiskPayload preserves Huawei catalog metadata for High I/O",
       volumeType: "General Purpose SSD",
       productSpecSysDesc: "Disk Specifications:General Purpose SSD",
       productId: "00301-247376-0--0",
+      billingItem: "detail_68_",
       type: "dataInfo_43_",
+      addToList_product: "dataInfo_43_ | 40BSSUNIT.pluralUnit.17",
+      bakPlanList: [
+        {
+          productId: "00301-247376-0--0",
+          billingMode: "ONDEMAND",
+          usageMeasureId: 6,
+          amount: 0.000247,
+        },
+      ],
       inquiryResult: {
         id: "old-id",
       },
@@ -32,8 +42,26 @@ test("buildEcsSystemDiskPayload preserves Huawei catalog metadata for High I/O",
       volumeType: "High I/O",
       productSpecSysDesc: "Disk Specifications:High I/O",
       productId: "00301-135025-0--0",
+      billingItem: "detail_68_",
       type: "dataInfo_24_",
       amount: 0.000112,
+      info: "dataInfo_26_",
+      specifications: "dataInfo_27_",
+      tableUnit: "detail_26_",
+      planList: [
+        {
+          productId: "00301-135025-0--0",
+          billingMode: "ONDEMAND",
+          siteCode: "HWC",
+          periodNum: null,
+          billingEvent: "event.type.volumeduration",
+          measureUnitStep: 1,
+          measureUnit: 4,
+          usageFactor: "Duration",
+          usageMeasureId: 6,
+          amount: 0.000112,
+        },
+      ],
     },
     diskSize: 40,
     quantity: 2,
@@ -53,7 +81,19 @@ test("buildEcsSystemDiskPayload preserves Huawei catalog metadata for High I/O",
   expect(payload.productSpecSysDesc).toBe("Disk Specifications:High I/O");
   expect(payload.productId).toBe("00301-135025-0--0");
   expect(payload.type).toBe("dataInfo_24_");
+  expect(payload.addToList_product).toBe("dataInfo_24_ | 40BSSUNIT.pluralUnit.17");
+  expect(payload.bakPlanList).toEqual([
+    expect.objectContaining({
+      productId: "00301-135025-0--0",
+      billingMode: "ONDEMAND",
+      usageMeasureId: 6,
+      amount: 0.000112,
+    }),
+  ]);
+  expect(payload.planList).toBeUndefined();
   expect(payload.billingMode).toBe("ONDEMAND");
+  expect(payload.amount).toBe(0.000112);
+  expect(payload.usageMeasureId).toBe(6);
   expect(payload.productNum).toBe(2);
   expect(payload.usageValue).toBe(744);
   expect((payload.inquiryResult as { productId?: string }).productId).toBe("00301-135025-0--0");
