@@ -422,7 +422,7 @@ describe("catalog helpers", () => {
     });
   });
 
-  test("buildCatalogPriceEstimate uses RI purchase pricing without hourly disk math", () => {
+  test("buildCatalogPriceEstimate annualizes RI system disks for the saved Huawei payload", () => {
     const estimate = buildCatalogPriceEstimate({
       product: {
         ec2_vm: [
@@ -438,7 +438,7 @@ describe("catalog helpers", () => {
         ebs_volume: [
           makeDisk("GPSSD", {
             productId: "disk-ondemand",
-            bakPlanList: [{ billingMode: "ONDEMAND", amount: 0.01 }],
+            bakPlanList: [{ billingMode: "ONDEMAND", amount: 0.000247 }],
           }),
         ],
       },
@@ -452,9 +452,9 @@ describe("catalog helpers", () => {
     });
 
     expect(estimate).toEqual({
-      amount: 540.48,
+      amount: 627.0288,
       discountAmount: 0,
-      originalAmount: 540.48,
+      originalAmount: 627.0288,
       currency: "USD",
       productRatingResult: [
         {
@@ -467,9 +467,9 @@ describe("catalog helpers", () => {
         {
           id: "cached-disk-disk-ondemand",
           productId: "disk-ondemand",
-          amount: 0,
+          amount: 86.5488,
           discountAmount: 0,
-          originalAmount: 0,
+          originalAmount: 86.5488,
         },
       ],
     });

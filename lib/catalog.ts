@@ -192,6 +192,7 @@ type CatalogPricedItem = {
 };
 
 const ONE_YEAR_RI_TERM_MONTHS = 12;
+const ONE_YEAR_RI_TERM_HOURS = 8760;
 
 function getFlavorPlanCount(flavor: ProductFlavor): number {
   return (flavor.planList?.length ?? 0) + (flavor.bakPlanList?.length ?? 0);
@@ -657,7 +658,11 @@ export function buildCatalogPriceEstimate(
   const diskSize = Math.max(0, config.diskSize);
   const isReservedInstance = config.pricingMode === "RI";
   const flavorAmount = roundMoney(flavorRate * quantity * (isReservedInstance ? 1 : durationValue));
-  const diskAmount = roundMoney(isReservedInstance ? 0 : diskRate * diskSize * quantity * durationValue);
+  const diskAmount = roundMoney(
+    isReservedInstance
+      ? diskRate * diskSize * quantity * ONE_YEAR_RI_TERM_HOURS
+      : diskRate * diskSize * quantity * durationValue,
+  );
   const totalAmount = roundMoney(flavorAmount + diskAmount);
 
   return {

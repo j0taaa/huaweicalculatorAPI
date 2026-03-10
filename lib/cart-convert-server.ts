@@ -22,9 +22,11 @@ import {
   normalizeDiskTypeApiCode,
 } from "@/lib/disk-types";
 import {
-  buildEcsFlavorAddToListProduct,
+  buildEcsBuyUrl,
   buildEcsImagePayload,
   buildEcsSystemDiskPayload,
+  buildEcsVmPayload,
+  getSelectedFlavorRiPlanGroup,
   getEcsSystemDiskStepperType,
 } from "@/lib/ecs-payload";
 import {
@@ -332,30 +334,6 @@ function buildCartTotalPrice(items: CalculatorCartItemPayload[]) {
   };
 }
 
-function getFlavorSpec(flavor: ProductFlavor): string {
-  if (typeof flavor.spec === "string" && flavor.spec) {
-    return flavor.spec;
-  }
-
-  return flavor.resourceSpecCode.replace(/\.linux$/, "");
-}
-
-function buildEcsBuyUrl(
-  baseUrl: string,
-  region: string,
-  flavor: ProductFlavor,
-  diskType: string,
-  diskSize: number,
-  quantity: number,
-): string {
-  const url = new URL(baseUrl);
-  url.searchParams.set("region", region);
-  url.searchParams.set("flavor", getFlavorSpec(flavor));
-  url.searchParams.set("sysdisk", `${diskType}:${diskSize}`);
-  url.searchParams.set("vmcount", String(quantity));
-  return url.toString();
-}
-
 function buildEcsCalculatorItemPayload(
   sampleItem: CalculatorCartItemPayload,
   flavor: ProductFlavor,
@@ -374,13 +352,22 @@ function buildEcsCalculatorItemPayload(
   const diskRating = priceResponse.productRatingResult?.[1];
   const diskPricingMode = getEffectiveDiskPricingMode(config.pricingMode);
   const durationUnit = getPricingDurationUnit(config.pricingMode);
+  const riPlanGroup = config.pricingMode === "RI" ? getSelectedFlavorRiPlanGroup(flavor) : null;
+  const diskMonthlyAmount = config.pricingMode === "RI"
+    ? Number((((disk.planList ?? []).find((plan) => plan.billingMode === diskPricingMode)?.amount ?? (disk.bakPlanList ?? []).find((plan) => plan.billingMode === diskPricingMode)?.amount ?? 0) * config.diskSize * config.quantity * 730).toFixed(5))
+    : 0;
 
-  payload.buyUrl = buildEcsBuyUrl(payload.buyUrl ?? "", config.region, flavor, config.diskType, config.diskSize, config.quantity);
+  payload.buyUrl = buildEcsBuyUrl({
+    baseUrl: payload.buyUrl ?? "",
+    region: config.region,
+    flavor,
+    diskType: config.diskType,
+    diskSize: config.diskSize,
+    quantity: config.quantity,
+    pricingMode: config.pricingMode,
+  });
 
   rewriteValue.global_DESCRIPTION = config.description;
-  rewriteValue.global_PRICINGMODE = config.pricingMode;
-  rewriteValue.global_DISKPRICINGMODE = diskPricingMode;
-  rewriteValue.global_DURATIONUNIT = durationUnit;
   rewriteValue.global_REGIONINFO = {
     region: config.region,
     locationType: "commonAZ",
@@ -409,18 +396,34 @@ function buildEcsCalculatorItemPayload(
   };
   evsStepper.calculator_evs_stepper_main = evsMain;
   templateRender.calculator_evs_stepper = evsStepper;
-  rewriteValue.template_RENDER = templateRender;
 
-  rewriteValue.global_ONDEMANDTIME = {
-    UNSET_Stepper_0: {
-      measureId: 4,
-      measureValue: config.durationValue,
-      measureNameBeforeTrans: "",
-      measurePluralNameBeforeTrans: "",
-      transRate: "",
-      transTarget: "",
-    },
-  };
+  if (config.pricingMode === "RI") {
+    templateRender.calculator_ecs_RIRadio = {
+      paymentType: riPlanGroup?.paymentType ?? "nodeData.NO_UPFRONT",
+      RITime: "nodeData.1_3",
+    };
+    delete rewriteValue.global_ONDEMANDTIME;
+    delete rewriteValue.global_PRICINGMODE;
+    delete rewriteValue.global_DISKPRICINGMODE;
+    delete rewriteValue.global_DURATIONUNIT;
+  } else {
+    rewriteValue.global_PRICINGMODE = config.pricingMode;
+    rewriteValue.global_DISKPRICINGMODE = diskPricingMode;
+    rewriteValue.global_DURATIONUNIT = durationUnit;
+    rewriteValue.global_ONDEMANDTIME = {
+      UNSET_Stepper_0: {
+        measureId: 4,
+        measureValue: config.durationValue,
+        measureNameBeforeTrans: "",
+        measurePluralNameBeforeTrans: "",
+        transRate: "",
+        transTarget: "",
+      },
+    };
+    delete templateRender.calculator_ecs_RIRadio;
+  }
+
+  rewriteValue.template_RENDER = templateRender;
 
   rewriteValue.global_QUANTITY = {
     UNSET_Stepper_0: {
@@ -439,18 +442,36 @@ function buildEcsCalculatorItemPayload(
   selectedProduct._customTitle = config.title;
   selectedProduct.chargeMode = config.pricingMode;
   selectedProduct.chargeModeName = config.pricingMode;
+  selectedProduct.locationType = "commonAZ";
+  selectedProduct.tag = "general.online.portal";
+  selectedProduct.serviceCode = "ecs";
+  selectedProduct.periodType = config.pricingMode === "RI" ? 3 : 4;
+  selectedProduct.periodNum = 1;
+  selectedProduct.subscriptionNum = 1;
   selectedProduct.calculatorPricingMode = config.pricingMode;
   selectedProduct.calculatorDiskPricingMode = diskPricingMode;
   selectedProduct.calculatorDurationUnit = durationUnit;
   selectedProduct.amount = priceResponse.amount;
   selectedProduct.discountAmount = priceResponse.discountAmount;
   selectedProduct.originalAmount = priceResponse.originalAmount;
-  selectedProduct.purchaseTime = {
-    measureValue: config.durationValue,
-    measureId: 4,
-    measureNameBeforeTrans: "",
-    measurePluralNameBeforeTrans: "",
-  };
+  if (config.pricingMode === "RI") {
+    selectedProduct.perAmount = Number((((riPlanGroup?.perPrice ?? 0) * config.quantity) + diskMonthlyAmount).toFixed(5));
+    selectedProduct.perDiscountAmount = 0;
+    selectedProduct.perOriginalAmount = 0;
+    selectedProduct.installAmount = 0;
+    delete selectedProduct.purchaseTime;
+  } else {
+    delete selectedProduct.perAmount;
+    delete selectedProduct.perDiscountAmount;
+    delete selectedProduct.perOriginalAmount;
+    delete selectedProduct.installAmount;
+    selectedProduct.purchaseTime = {
+      measureValue: config.durationValue,
+      measureId: 4,
+      measureNameBeforeTrans: "",
+      measurePluralNameBeforeTrans: "",
+    };
+  }
   selectedProduct.purchaseNum = {
     measureValue: config.quantity,
     measureId: 41,
@@ -458,41 +479,24 @@ function buildEcsCalculatorItemPayload(
     measurePluralNameBeforeTrans: "calc_30_",
   };
 
-  productAllInfos[0] = {
-    ...vmInfo,
-    ...flavor,
-    resourceType: flavor.resourceType ?? vmInfo.resourceType,
-    cloudServiceType: flavor.cloudServiceType ?? vmInfo.cloudServiceType,
-    resourceSpecCode: flavor.resourceSpecCode,
-    productSpecSysDesc: flavor.productSpecSysDesc ?? vmInfo.productSpecSysDesc,
-    addToList_product: buildEcsFlavorAddToListProduct(flavor, vmInfo),
-    productNum: config.quantity,
-    selfProductNum: config.quantity,
-    billingMode: config.pricingMode,
-    usageValue: config.durationValue,
-    inquiryResult: {
-      ...(vmInfo.inquiryResult as Record<string, unknown>),
-      id: vmRating?.id ?? (vmInfo.inquiryResult as Record<string, unknown>)?.id,
-      productId: vmRating?.productId ?? flavor.productId ?? vmInfo.productId,
-      amount: vmRating?.amount ?? vmInfo.amount,
-      discountAmount: vmRating?.discountAmount ?? 0,
-      originalAmount: vmRating?.originalAmount ?? vmInfo.originalAmount ?? vmInfo.amount,
-      perAmount: null,
-      perDiscountAmount: null,
-      perOriginalAmount: null,
-      perPeriodType: null,
-      measureId: 1,
-      extendParams: null,
-    },
-  };
+  const nextVmInfo = buildEcsVmPayload({
+    existingVmInfo: vmInfo,
+    flavor,
+    quantity: config.quantity,
+    durationValue: config.durationValue,
+    pricingMode: config.pricingMode,
+    vmRating,
+  });
 
-  productAllInfos[1] = buildEcsImagePayload({
+  const nextImageInfo = buildEcsImagePayload({
     existingImageInfo: imageInfo,
     flavor,
     durationValue: config.durationValue,
+    pricingMode: config.pricingMode,
+    quantity: config.quantity,
   });
 
-  productAllInfos[2] = buildEcsSystemDiskPayload({
+  const nextDiskInfo = buildEcsSystemDiskPayload({
     existingDiskInfo: diskInfo,
     disk,
     diskSize: config.diskSize,
@@ -502,7 +506,15 @@ function buildEcsCalculatorItemPayload(
     diskRating,
   });
 
-  selectedProduct.productAllInfos = productAllInfos;
+  if (config.pricingMode === "RI") {
+    selectedProduct.productAllInfos = [nextImageInfo, nextVmInfo, nextDiskInfo];
+  } else {
+    productAllInfos[0] = nextVmInfo;
+    productAllInfos[1] = nextImageInfo;
+    productAllInfos[2] = nextDiskInfo;
+    selectedProduct.productAllInfos = productAllInfos;
+  }
+
   payload.selectedProduct = selectedProduct;
   payload.rewriteValue = rewriteValue;
 
