@@ -2228,15 +2228,6 @@ export default function Home() {
     };
 
     await submitCartUpdate(nextKey, duplicatePayload);
-    setCartDetailCache((current) => ({
-      ...current,
-      [nextKey]: {
-        billingMode: duplicatePayload.billingMode,
-        cartListData: duplicatePayload.cartListData,
-        name: duplicatePayload.name,
-        totalPrice: duplicatePayload.totalPrice,
-      },
-    }));
     return nextKey;
   }
 
@@ -2775,19 +2766,19 @@ export default function Home() {
       };
 
       await submitCartUpdate(nextKey, nextPayload);
-      setCartDetailCache((current) => ({
-        ...current,
-        [nextKey]: {
-          billingMode: nextPayload.billingMode,
-          cartListData: nextPayload.cartListData,
-          name: nextPayload.name,
-          totalPrice: nextPayload.totalPrice,
-        },
-      }));
       await refreshCarts();
+      setCartDetailResult(null);
       setSelectedCartKey(nextKey);
       setSelectedCartName(duplicateName);
-      await loadCartDetail(nextKey, true);
+      setCartDetailCache((current) => {
+        if (!(nextKey in current)) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[nextKey];
+        return next;
+      });
       setConversionSummary(`Created ${duplicateName} by duplicating ${sourceName} and converting ECS items to ${getPricingModeLabel(billingConversionMode)}. EVS stayed on-demand.`);
     } catch (error) {
       setAppError(error instanceof Error ? error.message : "Failed to convert the selected cart billing mode");
@@ -2831,19 +2822,19 @@ export default function Home() {
       };
 
       await submitCartUpdate(nextKey, nextPayload);
-      setCartDetailCache((current) => ({
-        ...current,
-        [nextKey]: {
-          billingMode: nextPayload.billingMode,
-          cartListData: nextPayload.cartListData,
-          name: nextPayload.name,
-          totalPrice: nextPayload.totalPrice,
-        },
-      }));
       await refreshCarts();
+      setCartDetailResult(null);
       setSelectedCartKey(nextKey);
       setSelectedCartName(duplicateName);
-      await loadCartDetail(nextKey, true);
+      setCartDetailCache((current) => {
+        if (!(nextKey in current)) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[nextKey];
+        return next;
+      });
       setConversionSummary(`Created ${duplicateName} by duplicating ${sourceName} and converting all items to ${regionLabel}. ECS flavors were re-matched; EVS kept the same type and size.`);
     } catch (error) {
       setAppError(error instanceof Error ? error.message : "Failed to convert the selected cart region");
