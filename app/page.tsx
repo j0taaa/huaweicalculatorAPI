@@ -2250,20 +2250,26 @@ export default function Home() {
     }
 
     const items = getRemoteCartItems(detail);
-    const catalogs = new Map<string, CatalogCacheResult>();
+    const catalogPromises = new Map<string, Promise<CatalogCacheResult>>();
     const getCatalog = async (region: string, service: CalculatorService) => {
       const key = `${service}:${region}`;
-      const cached = catalogs.get(key);
-      if (cached) {
-        return cached;
+      const cachedPromise = catalogPromises.get(key);
+      if (cachedPromise) {
+        return cachedPromise;
       }
 
-      const result = await getCatalogForService(region, service);
-      catalogs.set(key, result);
-      return result;
+      const nextPromise = getCatalogForService(region, service);
+      catalogPromises.set(key, nextPromise);
+      return nextPromise;
     };
 
-    return Promise.all(items.map(async (item) => {
+    await Promise.all(Array.from(new Set(items.map((item) => `${item.service}:${item.region}`))).map(async (key) => {
+      const [service, region] = key.split(":");
+      await getCatalog(region ?? DEFAULT_REGION, service === "evs" ? "evs" : "ecs");
+    }));
+
+    const convertedItems: ShareCartItemPayload[] = [];
+    for (const item of items) {
       const description = resolveItemDescription(
         item.description,
         item.service === "ecs" ? item.resourceCode : DEFAULT_EVS_DESCRIPTION,
@@ -2306,7 +2312,7 @@ export default function Home() {
           throw new Error(`Cached ${getPricingModeLabel(targetPricingMode)} pricing is unavailable for ${matchedFlavor.resourceSpecCode} in ${item.region}`);
         }
 
-        return buildEcsCalculatorItemPayload(samplePayload, matchedFlavor, targetDisk, estimate, {
+        convertedItems.push(buildEcsCalculatorItemPayload(samplePayload, matchedFlavor, targetDisk, estimate, {
           region: item.region,
           quantity: item.quantity,
           durationValue,
@@ -2315,7 +2321,8 @@ export default function Home() {
           diskSize: item.diskSize,
           title: description,
           description,
-        });
+        }));
+        continue;
       }
 
       const catalog = await getCatalog(item.region, "evs");
@@ -2338,7 +2345,7 @@ export default function Home() {
         throw new Error(`Cached on-demand EVS pricing is unavailable for ${targetDiskType} in ${item.region}`);
       }
 
-      return buildEvsCalculatorItemPayload(item.payload, targetDisk, estimate, {
+      convertedItems.push(buildEvsCalculatorItemPayload(item.payload, targetDisk, estimate, {
         region: item.region,
         quantity: item.quantity,
         durationValue,
@@ -2347,8 +2354,10 @@ export default function Home() {
         diskSize: item.diskSize,
         title: description,
         description,
-      });
-    }));
+      }));
+    }
+
+    return convertedItems;
   }
 
   async function buildRegionConversionItems(detail: ShareCartDetail, targetRegion: string) {
