@@ -1,5 +1,3 @@
-import "server-only";
-
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { CachedReplayResult, CatalogRegion } from "@/lib/catalog-db";

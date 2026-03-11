@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "local-proxy": "bun run scripts/huawei-local-proxy.ts",
     "test:replay": "bun run scripts/replay-postman.ts",
     "test:replay:noauth": "bun run scripts/replay-postman.ts --without-auth --allow-non-2xx",
     "test:api": "bun run scripts/test-local-api.ts"
@@ -14,7 +15,8 @@
   "dependencies": {
     "next": "16.1.6",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
