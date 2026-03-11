@@ -60,8 +60,6 @@ type ReplayResult = {
   authExpired?: boolean;
   authCode?: string;
   authMessage?: string;
-  accessBlocked?: boolean;
-  accessCode?: string;
   endpoint: {
     id: string;
     name: string;
@@ -89,8 +87,6 @@ type CartDetailResult = {
   authExpired?: boolean;
   authCode?: string;
   authMessage?: string;
-  accessBlocked?: boolean;
-  accessCode?: string;
   request: {
     method: string;
     url: string;
@@ -157,8 +153,6 @@ type CartConversionResult = {
   authExpired?: boolean;
   authCode?: string;
   authMessage?: string;
-  accessBlocked?: boolean;
-  accessCode?: string;
   error?: string;
 };
 
@@ -352,11 +346,6 @@ const DEFAULT_SERVICE: CalculatorService = "ecs";
 const DEFAULT_ECS_DESCRIPTION = "Elastic Cloud Server";
 const DEFAULT_EVS_DESCRIPTION = "Elastic Volume Service";
 const MAX_EVS_DISK_SIZE_GB = 32768;
-const LOCAL_HELPER_BASE_URL = "http://127.0.0.1:4318";
-
-function getSessionApiUrl(path: "replay" | "cart-detail" | "cart-convert", useLocalHelper: boolean) {
-  return useLocalHelper ? `${LOCAL_HELPER_BASE_URL}/${path}` : `/api/${path}`;
-}
 const DEFAULT_PRICING_MODE: CatalogPricingMode = "ONDEMAND";
 const PRICING_MODE_OPTIONS: Array<{ value: CatalogPricingMode; label: string }> = [
   { value: "ONDEMAND", label: "On-demand" },
@@ -1395,8 +1384,6 @@ export default function Home() {
   const [publishResult, setPublishResult] = useState<ReplayResult | null>(null);
   const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
   const [debugOpen, setDebugOpen] = useState(false);
-  const [localHelperAvailable, setLocalHelperAvailable] = useState(false);
-  const [localHelperChecking, setLocalHelperChecking] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -1467,35 +1454,6 @@ export default function Home() {
     window.localStorage.setItem("hwc-cookie", cookie);
     window.localStorage.setItem("hwc-csrf", csrf);
   }, [cookie, csrf, sessionReady]);
-
-  const checkLocalHelper = useCallback(async () => {
-    setLocalHelperChecking(true);
-
-    try {
-      const response = await fetch(`${LOCAL_HELPER_BASE_URL}/health`, {
-        cache: "no-store",
-        signal: AbortSignal.timeout(2_000),
-      });
-      if (!response.ok) {
-        setLocalHelperAvailable(false);
-        return false;
-      }
-
-      const data = await response.json() as { ok?: boolean };
-      const nextAvailable = data.ok === true;
-      setLocalHelperAvailable(nextAvailable);
-      return nextAvailable;
-    } catch {
-      setLocalHelperAvailable(false);
-      return false;
-    } finally {
-      setLocalHelperChecking(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void checkLocalHelper();
-  }, [checkLocalHelper]);
 
   const normalizedCookie = normalizeHuaweiCookieInput(cookie);
   const flavors = getCatalogFlavors(catalogResult?.response.body);
@@ -1621,19 +1579,27 @@ export default function Home() {
       bodyRaw?: string;
     },
   ): Promise<ReplayResult> {
-    const { response, data } = await postSessionApi("replay", {
-      id,
-      url: options?.url,
-      bodyRaw: options?.bodyRaw,
-      cookie: normalizedCookie || undefined,
-      csrf: csrf.trim() || undefined,
-      useCapturedAuth: true,
+    const response = await fetch("/api/replay", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id,
+        url: options?.url,
+        bodyRaw: options?.bodyRaw,
+        cookie: normalizedCookie || undefined,
+        csrf: csrf.trim() || undefined,
+        useCapturedAuth: true,
+      }),
     });
+    const data = (await response.json()) as ReplayResult & { error?: string; authExpired?: boolean };
     if (!response.ok) {
-      throw new Error(getSessionErrorMessage(`Replay failed with status ${response.status}`, data));
+      if (response.status === 401 && data.authExpired) {
+        throw new Error(data.error ?? "Huawei session expired. Open Session and paste a fresh cookie or HWS_INTL_ID.");
+      }
+      throw new Error(data.error ?? `Replay failed with status ${response.status}`);
     }
 
-    return data as ReplayResult;
+    return data;
   }
 
   async function runCartConversion(conversion: {
@@ -1643,17 +1609,25 @@ export default function Home() {
     kind: "region";
     targetRegion: string;
   }): Promise<CartConversionResult> {
-    const { response, data } = await postSessionApi("cart-convert", {
-      key: selectedCartKey.trim(),
-      cookie: normalizedCookie || undefined,
-      csrf: csrf.trim() || undefined,
-      conversion,
+    const response = await fetch("/api/cart-convert", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        key: selectedCartKey.trim(),
+        cookie: normalizedCookie || undefined,
+        csrf: csrf.trim() || undefined,
+        conversion,
+      }),
     });
+    const data = (await response.json()) as CartConversionResult;
     if (!response.ok) {
-      throw new Error(getSessionErrorMessage(`Cart conversion failed with status ${response.status}`, data));
+      if (response.status === 401 && data.authExpired) {
+        throw new Error(data.error ?? "Huawei session expired. Open Session and paste a fresh cookie or HWS_INTL_ID.");
+      }
+      throw new Error(data.error ?? `Cart conversion failed with status ${response.status}`);
     }
 
-    return data as CartConversionResult;
+    return data;
   }
 
   async function fetchCatalogFromCache(region: string): Promise<CatalogCacheResult> {
@@ -1672,50 +1646,6 @@ export default function Home() {
   async function fetchEvsCatalog(region: string): Promise<CatalogCacheResult> {
     return fetchRemoteCatalog(region, "evs");
   }
-
-  const postSessionApi = useCallback(async (
-    path: "replay" | "cart-detail" | "cart-convert",
-    payload: unknown,
-  ) => {
-    const send = async (useLocalHelper: boolean) => {
-      const response = await fetch(getSessionApiUrl(path, useLocalHelper), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await response.json() as { error?: string; authExpired?: boolean; accessBlocked?: boolean };
-      return { response, data };
-    };
-
-    if (localHelperAvailable) {
-      return send(true);
-    }
-
-    const remoteAttempt = await send(false);
-    if (remoteAttempt.response.status === 403 && remoteAttempt.data.accessBlocked) {
-      const helperNowAvailable = await checkLocalHelper();
-      if (helperNowAvailable) {
-        return send(true);
-      }
-    }
-
-    return remoteAttempt;
-  }, [checkLocalHelper, localHelperAvailable]);
-
-  const getSessionErrorMessage = useCallback((
-    fallbackMessage: string,
-    data: { error?: string; authExpired?: boolean; accessBlocked?: boolean },
-  ) => {
-    if (data.authExpired) {
-      return data.error ?? "Huawei session expired. Open Session and paste a fresh cookie or HWS_INTL_ID.";
-    }
-
-    if (data.accessBlocked && !localHelperAvailable) {
-      return `${data.error ?? fallbackMessage} Run \`bun run local-proxy\` on your machine, then click Detect local helper.`;
-    }
-
-    return data.error ?? fallbackMessage;
-  }, [localHelperAvailable]);
 
   async function fetchRemoteCatalog(region: string, service: CalculatorService): Promise<CatalogCacheResult> {
     const template = findTemplate(templates, "get-product-options-and-info");
@@ -1779,21 +1709,29 @@ export default function Home() {
     setCartDetailError("");
 
     try {
-      const { response, data } = await postSessionApi("cart-detail", {
-        key: trimmedKey,
-        cookie: normalizedCookie || undefined,
-        csrf: csrf.trim() || undefined,
+      const response = await fetch("/api/cart-detail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          key: trimmedKey,
+          cookie: normalizedCookie || undefined,
+          csrf: csrf.trim() || undefined,
+        }),
       });
+      const data = (await response.json()) as CartDetailResult & { error?: string; authExpired?: boolean };
       if (!response.ok) {
-        throw new Error(getSessionErrorMessage(`Cart detail lookup failed with status ${response.status}`, data));
+        if (response.status === 401 && data.authExpired) {
+          throw new Error(data.error ?? "Huawei session expired. Open Session and paste a fresh cookie or HWS_INTL_ID.");
+        }
+        throw new Error(data.error ?? `Cart detail lookup failed with status ${response.status}`);
       }
 
-      const nextDetail = getShareCartDetail((data as CartDetailResult).response.body);
+      const nextDetail = getShareCartDetail(data.response.body);
       if (!nextDetail) {
         throw new Error("Huawei cart detail did not return a usable payload");
       }
 
-      setCartDetailResult(data as CartDetailResult);
+      setCartDetailResult(data);
       setCartDetailCache((current) => ({
         ...current,
         [trimmedKey]: nextDetail,
@@ -1811,7 +1749,7 @@ export default function Home() {
     } finally {
       setCartDetailLoading(false);
     }
-  }, [cartDetailCache, csrf, getSessionErrorMessage, normalizedCookie, postSessionApi, selectedCartName]);
+  }, [cartDetailCache, csrf, normalizedCookie, selectedCartName]);
 
   async function refreshCarts() {
     setCartLoading(true);
@@ -2967,27 +2905,6 @@ export default function Home() {
               <p className="mt-1 break-all font-mono text-xs text-slate-700">{normalizedCookie}</p>
             </div>
           ) : null}
-
-          <div className="result-strip mt-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Local helper</p>
-                <p className="mt-1 text-xs text-slate-700">
-                  {localHelperAvailable
-                    ? `Detected at ${LOCAL_HELPER_BASE_URL}`
-                    : "Not detected. Run `bun run local-proxy` on your machine if Huawei blocks the server path."}
-                </p>
-              </div>
-              <button
-                className="btn btn-secondary"
-                disabled={localHelperChecking}
-                onClick={() => void checkLocalHelper()}
-                type="button"
-              >
-                {localHelperChecking ? "Checking..." : "Detect local helper"}
-              </button>
-            </div>
-          </div>
         </aside>
       ) : null}
 
