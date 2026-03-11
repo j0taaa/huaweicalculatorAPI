@@ -30,19 +30,6 @@ export function extractEcsVisibilityConfig(scriptText: string): EcsCalculatorVis
   };
 }
 
-export async function fetchEcsVisibilityConfig(): Promise<EcsCalculatorVisibilityConfig> {
-  const response = await fetch(ECS_CONFIG_URL, {
-    headers: { "X-Language": "en-us" },
-    signal: AbortSignal.timeout(30_000),
-  });
-
-  if (!response.ok) {
-    throw new Error(`ECS config request failed: ${response.status} ${response.statusText}`);
-  }
-
-  return extractEcsVisibilityConfig(await response.text());
-}
-
 export function getFlavorGeneration(flavor: ProductFlavor): string {
   const fromField = typeof flavor.generation === "string" ? flavor.generation.trim() : "";
   if (fromField) {

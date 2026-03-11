@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { sendHttpRequest } from "@/lib/huawei-http";
 
 export type PostmanHeader = {
   key: string;
@@ -108,10 +109,16 @@ function parseBody(raw: string | null): unknown {
   }
 }
 
-async function readResponse(response: Response, startedAt: number) {
-  const durationMs = Date.now() - startedAt;
-  const contentType = response.headers.get("content-type") ?? "";
-  const text = await response.text();
+async function readResponse(response: {
+  ok: boolean;
+  status: number;
+  statusText: string;
+  contentType: string;
+  durationMs: number;
+  bodyText: string;
+}) {
+  const contentType = response.contentType;
+  const text = response.bodyText;
 
   let parsed: unknown = text;
   if (contentType.includes("application/json") || text.trim().startsWith("{") || text.trim().startsWith("[")) {
@@ -127,7 +134,7 @@ async function readResponse(response: Response, startedAt: number) {
     status: response.status,
     statusText: response.statusText,
     contentType,
-    durationMs,
+    durationMs: response.durationMs,
     body: parsed,
     rawTextPreview: text.slice(0, 1200),
   };
@@ -236,18 +243,13 @@ export async function replayRequest(input: ReplayInput) {
   const url = input.url?.trim() ? input.url : template.url;
   const bodyRaw = input.bodyRaw !== undefined ? input.bodyRaw : template.bodyRaw;
 
-  const init: RequestInit = {
+  const response = await sendHttpRequest({
     method: template.method,
-    headers,
-    signal: AbortSignal.timeout(30_000),
-  };
-
-  if (bodyRaw && template.method !== "GET") {
-    init.body = bodyRaw;
-  }
-
-  const startedAt = Date.now();
-  const response = await fetch(url, init);
+    url,
+    headers: headers as Record<string, string>,
+    body: bodyRaw,
+    timeoutMs: 30_000,
+  });
 
   return {
     template,
@@ -258,7 +260,7 @@ export async function replayRequest(input: ReplayInput) {
       bodyRaw,
       useCapturedAuth: input.useCapturedAuth !== false,
     },
-    response: await readResponse(response, startedAt),
+    response: await readResponse(response),
   };
 }
 
@@ -269,11 +271,11 @@ export async function fetchShareCartDetail(input: ShareCartDetailInput) {
 
   const headers = buildShareApiHeaders(input);
 
-  const startedAt = Date.now();
-  const response = await fetch(url, {
+  const response = await sendHttpRequest({
     method: "GET",
+    url: url.toString(),
     headers,
-    signal: AbortSignal.timeout(30_000),
+    timeoutMs: 30_000,
   });
 
   return {
@@ -284,6 +286,6 @@ export async function fetchShareCartDetail(input: ShareCartDetailInput) {
       bodyRaw: null,
       useCapturedAuth: Boolean(input.cookie || input.csrf),
     },
-    response: await readResponse(response, startedAt),
+    response: await readResponse(response),
   };
 }

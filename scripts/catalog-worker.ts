@@ -22,7 +22,8 @@ import {
   type CachedReplayResult,
   type CatalogRegion,
 } from "@/lib/catalog-db";
-import { fetchEcsVisibilityConfig, type EcsCalculatorVisibilityConfig } from "@/lib/catalog-config";
+import { type EcsCalculatorVisibilityConfig } from "@/lib/catalog-config";
+import { fetchEcsVisibilityConfig } from "@/lib/catalog-config-server";
 import { getTemplateById, replayRequest } from "@/lib/postman";
 
 const REGION_DISCOVERY_URL = "https://sa-brazil-1-console.huaweicloud.com/apiexplorer/new/v6/regions?product_short=ECS&api_name=ListFlavors";
