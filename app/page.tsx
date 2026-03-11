@@ -43,6 +43,7 @@ import {
   buildEvsDiskPayloadFields,
   buildEvsPayloadLabels,
 } from "@/lib/evs-payload";
+import { normalizeHuaweiCookieInput } from "@/lib/huawei-session";
 
 type Template = {
   id: string;
@@ -598,30 +599,6 @@ function getShareCartDetail(body: unknown): ShareCartDetail | null {
   }
 
   return data as ShareCartDetail;
-}
-
-function extractMinimalCookie(input: string): string {
-  const trimmed = input.trim();
-  if (!trimmed) {
-    return "";
-  }
-
-  if (!trimmed.includes("=") && !trimmed.includes(";")) {
-    return `HWS_INTL_ID=${trimmed}`;
-  }
-
-  if (trimmed.startsWith("HWS_INTL_ID=") && !trimmed.includes(";")) {
-    return trimmed;
-  }
-
-  const parts = trimmed.split(/;\s*/);
-  for (const part of parts) {
-    if (part.startsWith("HWS_INTL_ID=")) {
-      return part;
-    }
-  }
-
-  return trimmed;
 }
 
 function parseBulkEcsRequests(input: string): BulkEcsRequest[] {
@@ -1478,7 +1455,7 @@ export default function Home() {
     window.localStorage.setItem("hwc-csrf", csrf);
   }, [cookie, csrf, sessionReady]);
 
-  const normalizedCookie = extractMinimalCookie(cookie);
+  const normalizedCookie = normalizeHuaweiCookieInput(cookie);
   const flavors = getCatalogFlavors(catalogResult?.response.body);
   const disks = getCatalogDisks(catalogResult?.response.body);
   const deferredCatalogSearch = useDeferredValue(catalogSearch);
@@ -2922,7 +2899,7 @@ export default function Home() {
           />
 
           <p className="mt-3 text-xs text-slate-500">
-            The app reduces the cookie to the minimal form used by the cart APIs: <code>HWS_INTL_ID=...</code>.
+            If you paste the full cookie string, the app keeps it intact. A bare token is still treated as <code>HWS_INTL_ID=...</code>.
           </p>
 
           {normalizedCookie ? (
@@ -3168,7 +3145,7 @@ export default function Home() {
                   </>
                 ) : (
                   <p className="text-sm text-slate-500">
-                    {normalizedCookie ? "Refresh carts to load your live Huawei cart list." : "Open Session and paste your HWS_INTL_ID to load carts."}
+                    {normalizedCookie ? "Refresh carts to load your live Huawei cart list." : "Open Session and paste your full Huawei cookie or HWS_INTL_ID to load carts."}
                   </p>
                 )}
               </div>

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { replayRequest, maskSensitiveValue } from "@/lib/postman";
-import { detectHuaweiAuthIssue } from "@/lib/huawei-auth";
+import { detectHuaweiAccessIssue, detectHuaweiAuthIssue } from "@/lib/huawei-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +56,33 @@ export async function POST(request: NextRequest) {
           testedAt: new Date().toISOString(),
         },
         { status: 401 },
+      );
+    }
+
+    const accessIssue = detectHuaweiAccessIssue(result.response);
+    if (accessIssue) {
+      return NextResponse.json(
+        {
+          error: accessIssue.message,
+          accessBlocked: true,
+          accessCode: accessIssue.code,
+          endpoint: {
+            id: result.template.id,
+            name: result.template.name,
+          },
+          request: {
+            ...result.request,
+            headers: Object.fromEntries(
+              Object.entries(result.request.headers).map(([key, value]) => [
+                key,
+                maskSensitiveValue(key, value),
+              ]),
+            ),
+          },
+          response: result.response,
+          testedAt: new Date().toISOString(),
+        },
+        { status: 403 },
       );
     }
 

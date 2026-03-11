@@ -3,6 +3,11 @@ export type HuaweiAuthIssue = {
   message: string;
 };
 
+export type HuaweiAccessIssue = {
+  code: string;
+  message: string;
+};
+
 function extractAuthCode(body: unknown): string {
   if (!body || typeof body !== "object") {
     return "";
@@ -58,7 +63,6 @@ export function detectHuaweiAuthIssue(response: {
     code === "CBC.0101"
     || code === "401"
     || response.status === 401
-    || response.status === 403
     || normalizedMessage.includes("user invalid")
     || normalizedMessage.includes("session")
     || normalizedMessage.includes("login")
@@ -74,5 +78,30 @@ export function detectHuaweiAuthIssue(response: {
   return {
     code: code || String(response.status),
     message: rawMessage || "Huawei session expired or is no longer valid",
+  };
+}
+
+export function detectHuaweiAccessIssue(response: {
+  status: number;
+  body: unknown;
+  rawTextPreview?: string;
+}): HuaweiAccessIssue | null {
+  if (response.status !== 403) {
+    return null;
+  }
+
+  const preview = response.rawTextPreview?.toLowerCase() ?? "";
+  const bodyText = typeof response.body === "string" ? response.body.toLowerCase() : "";
+  const haystack = `${preview}\n${bodyText}`;
+
+  if (!haystack.includes("forbid_code") && !haystack.includes("openresty") && !haystack.includes("request_id")) {
+    return null;
+  }
+
+  const forbidCodeMatch = haystack.match(/forbid_code[:\s]+([0-9]+)/);
+
+  return {
+    code: forbidCodeMatch?.[1] ?? "403",
+    message: "Huawei blocked the request at the edge before session validation. The cookie may still be valid, but the server request was rejected.",
   };
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   convertCartOnServer,
+  isHuaweiAccessError,
   isHuaweiAuthError,
   type CartConversionRequest,
 } from "@/lib/cart-convert-server";
@@ -69,6 +70,17 @@ export async function POST(request: NextRequest) {
           authMessage: error.authMessage,
         },
         { status: 401 },
+      );
+    }
+
+    if (isHuaweiAccessError(error)) {
+      return NextResponse.json(
+        {
+          error: error.message,
+          accessBlocked: true,
+          accessCode: error.code,
+        },
+        { status: 403 },
       );
     }
 

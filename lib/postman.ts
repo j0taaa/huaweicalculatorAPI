@@ -181,6 +181,39 @@ function stripAuthHeaders(headers: Record<string, string>): Record<string, strin
   return next;
 }
 
+function buildShareApiHeaders(input: {
+  csrf?: string;
+  cookie?: string;
+}): Record<string, string> {
+  const template = getTemplateById("get-all-carts");
+  const headers = template
+    ? stripAuthHeaders(template.headers)
+    : {
+      accept: "application/json, text/plain, */*",
+      "accept-language": "en-US,en;q=0.9",
+      origin: "https://www.huaweicloud.com",
+      referer: "https://www.huaweicloud.com/intl/en-us/pricing/calculator.html?tempShareList=true",
+      "sec-ch-ua": "\"Google Chrome\";v=\"143\", \"Chromium\";v=\"143\", \"Not A(Brand\";v=\"24\"",
+      "sec-ch-ua-mobile": "?0",
+      "sec-ch-ua-platform": "\"Windows\"",
+      "sec-fetch-dest": "empty",
+      "sec-fetch-mode": "cors",
+      "sec-fetch-site": "same-site",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+      "x-framework-ob": "hec-hk",
+    };
+
+  if (input.csrf) {
+    headers.csrf = input.csrf;
+  }
+
+  if (input.cookie) {
+    headers.Cookie = input.cookie;
+  }
+
+  return headers;
+}
+
 export async function replayRequest(input: ReplayInput) {
   const template = getTemplateById(input.id);
 
@@ -234,17 +267,7 @@ export async function fetchShareCartDetail(input: ShareCartDetailInput) {
   url.searchParams.set("key", input.key);
   url.searchParams.set("language", input.language?.trim() || "en-us");
 
-  const headers: Record<string, string> = {
-    accept: "application/json, text/plain, */*",
-  };
-
-  if (input.csrf) {
-    headers.csrf = input.csrf;
-  }
-
-  if (input.cookie) {
-    headers.Cookie = input.cookie;
-  }
+  const headers = buildShareApiHeaders(input);
 
   const startedAt = Date.now();
   const response = await fetch(url, {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { detectHuaweiAuthIssue } from "@/lib/huawei-auth";
+import { detectHuaweiAccessIssue, detectHuaweiAuthIssue } from "@/lib/huawei-auth";
 
 describe("detectHuaweiAuthIssue", () => {
   test("detects Huawei expired-session responses", () => {
@@ -35,5 +35,25 @@ describe("detectHuaweiAuthIssue", () => {
         data: [],
       },
     })).toBeNull();
+  });
+
+  test("does not treat openresty 403 pages as expired sessions", () => {
+    expect(detectHuaweiAuthIssue({
+      status: 403,
+      body: "<html><center><h1>403 Forbidden</h1></center><center>openresty</center><p>Forbid_code: 020100</p></html>",
+    })).toBeNull();
+  });
+});
+
+describe("detectHuaweiAccessIssue", () => {
+  test("detects Huawei edge blocks", () => {
+    expect(detectHuaweiAccessIssue({
+      status: 403,
+      body: "<html><center><h1>403 Forbidden</h1></center><center>openresty</center><p>Forbid_code: 020100</p></html>",
+      rawTextPreview: "<html><center><h1>403 Forbidden</h1></center><center>openresty</center><p>Forbid_code: 020100</p></html>",
+    })).toEqual({
+      code: "020100",
+      message: "Huawei blocked the request at the edge before session validation. The cookie may still be valid, but the server request was rejected.",
+    });
   });
 });

@@ -34,7 +34,7 @@ import {
   buildEvsDiskPayloadFields,
   buildEvsPayloadLabels,
 } from "@/lib/evs-payload";
-import { detectHuaweiAuthIssue } from "@/lib/huawei-auth";
+import { detectHuaweiAccessIssue, detectHuaweiAuthIssue } from "@/lib/huawei-auth";
 import { fetchShareCartDetail, getTemplateById, replayRequest } from "@/lib/postman";
 
 type ShareCartItemPayload = {
@@ -178,6 +178,16 @@ class HuaweiAuthError extends Error {
     this.name = "HuaweiAuthError";
     this.code = options?.code;
     this.authMessage = options?.authMessage;
+  }
+}
+
+class HuaweiAccessError extends Error {
+  code?: string;
+
+  constructor(message: string, options?: { code?: string }) {
+    super(message);
+    this.name = "HuaweiAccessError";
+    this.code = options?.code;
   }
 }
 
@@ -753,6 +763,11 @@ async function ensureNoAuthIssue(response: {
       { code: authIssue.code, authMessage: authIssue.message },
     );
   }
+
+  const accessIssue = detectHuaweiAccessIssue(response);
+  if (accessIssue) {
+    throw new HuaweiAccessError(accessIssue.message, { code: accessIssue.code });
+  }
 }
 
 async function createLiveCartWithName(name: string, auth: { cookie?: string; csrf?: string }) {
@@ -1052,4 +1067,8 @@ export async function convertCartOnServer(request: CartConversionRequest): Promi
 
 export function isHuaweiAuthError(error: unknown): error is HuaweiAuthError {
   return error instanceof HuaweiAuthError;
+}
+
+export function isHuaweiAccessError(error: unknown): error is HuaweiAccessError {
+  return error instanceof HuaweiAccessError;
 }
